@@ -84,3 +84,26 @@ class ShipmentLedger:
     def export(self, *, run_id: str) -> dict:
         return {"run_id": run_id, "events": list(self.events),
                 "snapshots": list(self.snapshots)}
+
+    @classmethod
+    def from_export(cls, doc: dict) -> "ShipmentLedger":
+        """跨重启恢复: 由持久化事件日志重建物化状态 (幂等重放)。"""
+        led = cls()
+        for e in doc["events"]:
+            t, op = e["ts_s"], e["operation_id"]
+            if e["type"] == "LoadPrepared":
+                led.prepare(op, pallet_id=e["pallet_id"],
+                            truck_id=e["truck_id"], tk_node=e["tk_node"],
+                            dock_node=e["dock_node"], t_s=t)
+            elif e["type"] == "LoadCommitted":
+                led._ops[op]["state"] = "COMMITTED"
+                led._ops[op]["commit_t_s"] = t
+                led._ops[op]["evidence_ref"] = e["evidence_ref"]
+                if e.get("truck_id"):
+                    led._ops[op]["truck_id"] = e["truck_id"]
+            elif e["type"] == "LoadAcked":
+                led._ops[op]["state"] = "ACKED"
+                led._ops[op]["ack_t_s"] = t
+        led.events = [dict(e) for e in doc["events"]]
+        led.snapshots = [dict(s) for s in doc.get("snapshots", ())]
+        return led

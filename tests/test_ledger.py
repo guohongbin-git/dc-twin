@@ -58,3 +58,22 @@ def test_snapshots_freeze_state_and_export_is_pure_json():
     doc = led.export(run_id="R1")
     assert doc["run_id"] == "R1" and doc["events"] == led.events
     assert len(doc["snapshots"]) == 2
+
+
+def test_cross_restart_recovery_from_export():
+    """C1 跨重启类: 持久化事件日志重放恢复物化状态; 事务可继续。"""
+    led = ShipmentLedger()
+    led.prepare("OP-1", pallet_id="p", truck_id="TRK01", tk_node="tk:T42",
+                dock_node="D_G42", t_s=1.0)
+    led.commit("OP-1", t_s=2.0, evidence_ref="E1")
+    led.ack("OP-1", t_s=2.2)
+    led.prepare("OP-2", pallet_id="p2", truck_id="TRK02", tk_node="tk:T43",
+                dock_node="D_G43", t_s=3.0)
+    doc = led.export(run_id="R1")
+    recovered = ShipmentLedger.from_export(doc)
+    assert recovered.state_of("OP-1")["state"] == "ACKED"
+    assert recovered.state_of("OP-2")["state"] == "PREPARED"
+    assert recovered.state_of("OP-1")["commit_t_s"] == 2.0
+    recovered.commit("OP-2", t_s=3.4, evidence_ref="E2")   # 恢复后事务可继续
+    recovered.ack("OP-2", t_s=3.5)
+    assert recovered.state_of("OP-2")["state"] == "ACKED"

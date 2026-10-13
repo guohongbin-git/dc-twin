@@ -84,7 +84,7 @@ def build_load_event(*, event_id: str, operation_id: str, pallet_id: str,
                      verdict_failures: tuple[str, ...],
                      estimated_event_time: tuple[float, float] | None = None,
                      ) -> LoadEvent:
-    """唯一构造入口: 时间三元组单调性 (同时钟域) 在此强制。"""
+    """唯一构造入口: 时间三元组单调性 (同时钟域) + 证据过期在此强制。"""
     register()
     t_capture = float(frames[-1].t) if frames else float("nan")
     if not (0.0 <= t_capture <= t_ingest <= t_decide):
@@ -95,10 +95,15 @@ def build_load_event(*, event_id: str, operation_id: str, pallet_id: str,
         caps = [f.t for f in frames]
         if caps != sorted(caps):
             raise ValueError("帧序列时间倒序")
+    failures = list(verdict_failures)
+    if frames and t_decide > frames[-1].t + _ev.VERDICT_TTL_S:
+        failures.append(
+            f"证据过期 (t_decide {t_decide:.3f} > valid_until "
+            f"{frames[-1].t + _ev.VERDICT_TTL_S:.3f})")
     last = frames[-1] if frames else None
     verdict = {
-        "passed": not verdict_failures,
-        "failures": list(verdict_failures),
+        "passed": not failures,
+        "failures": failures,
         "support": round(float(last.new_support), 4) if last else None,
         "old_support": round(float(last.old_support), 4) if last else None,
         "stable_window_s": (round(frames[-1].t - frames[0].t, 3)

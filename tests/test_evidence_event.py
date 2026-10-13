@@ -75,3 +75,25 @@ def test_event_roundtrip_and_verdict_summary():
     ev2 = LoadEvent.from_json(ev.to_json())
     assert ev2 == ev
     assert not ev.passed and "无有效租约" in ev.failures
+
+
+def test_stale_verdict_marked_expired():
+    """C1 过期消息类: 裁决晚于 verdict TTL → 事件证据层标记过期。"""
+    from services.world.evidence import VERDICT_TTL_S
+
+    late = build_load_event(
+        event_id="EVT-5", operation_id="OP-1", pallet_id="p",
+        truck_id="TRK01", tk_node="tk:T42", dock_node="D_G42", task_id="T1",
+        vehicle_id="A02", lease_id="l", frames=_frames(),
+        t_ingest=5.5 + VERDICT_TTL_S, t_decide=5.5 + VERDICT_TTL_S + 0.1,
+        verdict_failures=())
+    assert not late.passed
+    assert any("证据过期" in f for f in late.failures)
+    # TTL 内正常裁决不受影响
+    fresh = build_load_event(
+        event_id="EVT-6", operation_id="OP-1", pallet_id="p",
+        truck_id="TRK01", tk_node="tk:T42", dock_node="D_G42", task_id="T1",
+        vehicle_id="A02", lease_id="l", frames=_frames(),
+        t_ingest=5.6, t_decide=5.95,                        # TTL 内
+        verdict_failures=())
+    assert fresh.passed
