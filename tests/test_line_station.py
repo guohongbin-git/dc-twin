@@ -75,9 +75,9 @@ def _nest_pl000(c):
     """测试工装: 顶升焊携托直投 nest 的末段 (拾取后北送落座), 与
     runtime 供料环同制式; pl_000 以预载位为拾取位。"""
     v = c.veh["A02"]
-    run_segments(c, [_seg(v, "x", 2.31), _seg(v, "y", 1.94)])
-    c.grip("A02", "pl_000", True)                    # 拾取位 = 槽西南 (0.19, 0.16)
-    run_segments(c, [_seg(v, "y", 2.485, carry=True)])
+    run_segments(c, [_seg(v, "x", 2.19), _seg(v, "y", 1.94)])
+    c.grip("A02", "pl_000", True)                    # 拾取位 = 槽西南 (0.31, 0.16)
+    run_segments(c, [_seg(v, "y", 2.328 - 0.16, carry=True)])
     c.grip("A02", "pl_000", False)
 
 

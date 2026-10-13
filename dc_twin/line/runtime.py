@@ -51,6 +51,16 @@ CLEARER = "A03"                # 清型 AGV (出口 → 产出门架)
 HAUL_SPEED, HAUL_ACC = 0.30, 0.20
 CARRY_SPEED, CARRY_ACC = 0.15, 0.10
 CARRY_SETTLE = 0.30           # 携托段 settle (伺服到位)
+PIN_SPEED = 0.008
+
+
+def _pin_seg(view, up: bool) -> dict:
+    """销升/销降 (weld 联载下的携托越面/落座: 销行程 0.030 = 越面
+    净空, 落座后销回零脱离)。"""
+    return {"seg": (view.a["pin"],
+                    lambda: Ramp(view.q("pin") + view.off["pin"],
+                                 0.030 if up else 0.0, PIN_SPEED, 0.02),
+                    view.off["pin"], 0.20)}
 TRUNK_S_Y = 1.60               # A02 南干道
 CLEAR_Y = 2.80                 # A03 北干道
 #: 清型出发延迟 = 出料推完 (程序 ≈22.5s) 前先行 21.8s, 到出口
@@ -148,8 +158,8 @@ def _seg(view, axis: str, target: float, *, speed: float = HAUL_SPEED,
     return {"seg": (*view.seg(axis, target, speed, accel), settle)}
 
 
-IDLE_XY = (2.10, 2.60)       # A02 待命位 (西列; A03 待命 (1.90,3.02))
-A03_IDLE_XY = (1.90, 3.02)   # A03 待命位 (产出行西端)
+IDLE_XY = (1.85, 2.60)       # A02 待命位 (西列; A03 待命 (1.90,3.02))
+A03_IDLE_XY = (1.85, 3.02)   # A03 待命位 (产出行西端)
 #: 拾取偏置 (AGV 停位点 − 槽位中心): 盘缘/凸台不触槽内支承
 PICK_OFFSET_X = 0.20
 #: nest 投放 y (AGV 摆位): 托盘北面顶靠背止挡面 (止挡面 = 2.355,
@@ -168,7 +178,7 @@ def _feed_trip_items(cell, view, *, pallet, slot_xy, nest_y) -> tuple[list, dict
     items = [_seg(view, "y", sy),
              _seg(view, "x", 2.30),
              {"do": lambda: cell.grip(CARRIER, pallet, True)},
-             _seg(view, "x", 2.10, carry=True),
+             _seg(view, "x", 2.50 - PICK_OFFSET_X, carry=True),
              _seg(view, "y", PLACE_Y, carry=True),
              {"do": lambda: cell.grip(CARRIER, pallet, False)},
              _seg(view, "y", IDLE_XY[1], carry=True)]
