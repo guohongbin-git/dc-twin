@@ -1,0 +1,8 @@
+{
+  "run_id": "run12_y_recenter",
+  "seed": 7,
+  "scenario": "m2_matrix.transit_drop",
+  "drops_in_transit": 0,
+  "all_complete": true,
+  "head_on_passed": true
+}

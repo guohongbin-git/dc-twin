@@ -1,0 +1,7 @@
+{
+  "run_id": "run9_pinfix",
+  "seed": 7,
+  "scenario": "m2_matrix.pin_cycle",
+  "pin_hook_events": 0,
+  "op_errors": []
+}

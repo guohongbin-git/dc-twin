@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "esr.incident_record/0.1",
+  "title": "ESR 技能结晶四件套 (蓝图 §18.3): incident → {根因假设, 修复动作, 回归用例, 证据契约修订}",
+  "type": "object",
+  "required": ["schema", "incident_id", "title", "root_cause_hypothesis",
+               "fix_actions", "regression_cases", "evidence_contract_revision"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"const": "esr.incident_record/0.1"},
+    "incident_id": {"type": "string", "pattern": "^INC-[A-Za-z0-9-]+$"},
+    "title": {"type": "string", "minLength": 1},
+    "window": {
+      "type": "object",
+      "required": ["t_start", "t_end"],
+      "additionalProperties": false,
+      "properties": {
+        "t_start": {"type": "number"},
+        "t_end": {"type": "number"},
+        "clock_domain": {"type": "string"}
+      }
+    },
+    "runs": {"type": "array", "items": {"type": "string"}},
+    "source": {"type": "string"},
+    "root_cause_hypothesis": {
+      "type": "object",
+      "required": ["statement", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "statement": {"type": "string", "minLength": 1},
+        "mechanism": {"type": "array", "items": {"type": "string"}},
+        "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "evidence_refs": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "fix_actions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["action_id", "target", "description"],
+        "additionalProperties": false,
+        "properties": {
+          "action_id": {"type": "string", "minLength": 1},
+          "target": {"type": "string", "minLength": 1},
+          "description": {"type": "string", "minLength": 1},
+          "expected_effect": {"type": "string"}
+        }
+      }
+    },
+    "regression_cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["case_id", "scenario", "asserts", "covers_action"],
+        "additionalProperties": false,
+        "properties": {
+          "case_id": {"type": "string", "minLength": 1},
+          "name": {"type": "string"},
+          "seeds": {"type": "array", "items": {"type": "integer"}},
+          "scenario": {"type": "string", "minLength": 1},
+          "asserts": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["metric", "op"],
+              "additionalProperties": false,
+              "properties": {
+                "metric": {"type": "string", "minLength": 1},
+                "op": {"enum": ["eq", "ne", "lt", "le", "gt", "ge",
+                                 "empty", "nonempty", "contains",
+                                 "==", "!=", "<", "<=", ">", ">="]},
+                "value": {}
+              }
+            }
+          },
+          "covers_action": {"type": "string", "minLength": 1},
+          "evidence": {"type": "string"}
+        }
+      }
+    },
+    "evidence_contract_revision": {
+      "type": "object",
+      "required": ["revision_kind", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "revision_kind": {"enum": ["none", "amend", "new"]},
+        "summary": {"type": "string"},
+        "proposed_changes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "change"],
+            "properties": {
+              "path": {"type": "string", "minLength": 1},
+              "change": {"type": "string", "minLength": 1},
+              "reason": {"type": "string"},
+              "register": {
+                "type": "object",
+                "required": ["as"],
+                "additionalProperties": false,
+                "properties": {
+                  "as": {"enum": ["event_kind", "node_source"]},
+                  "kind": {"type": "string"},
+                  "description": {"type": "string"},
+                  "name": {"type": "string"}
+                }
+              }
+            }
+          }
+        },
+        "status": {"enum": ["draft"]}
+      }
+    }
+  }
+}

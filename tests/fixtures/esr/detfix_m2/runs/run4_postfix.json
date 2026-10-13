@@ -1,0 +1,10 @@
+{
+  "run_id": "run4_postfix",
+  "seed": 7,
+  "scenario": "m2_matrix.8task.determinism",
+  "op_errors": [],
+  "violations": [],
+  "max_pen_m": 1.2e-05,
+  "determinism_passed": true,
+  "all_complete": true
+}
