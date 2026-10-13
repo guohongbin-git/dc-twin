@@ -1,4 +1,8 @@
-"""产线场景注册表 (蓝图 §13: 机构参数进可扩展注册表)。
+"""产线场景注册表 (蓝图 §13/§14: 机构参数进可扩展注册表)。
+
+叙事定位 (§14 可口可乐装瓶体系对标): line-feed = 装瓶厂产线供料
+(Evidence-Grounded Bottling Line); ST-PRESS 为「压盖/冲压类工位」
+的力学抽象 —— 咬合 + 压线力判定与力剖面证据同构。
 
 工位 (ST-*) 与线边库架位 (L-B*) 的绑定关系、冲压机构参数全部经此
 注册进场景表 —— 运行时/评分器只读表, 不硬编码工位语义。首个实现
@@ -81,7 +85,7 @@ def station_sources(station_id: str) -> tuple[str, ...]:
 register_station(PressSpec(
     station_id="ST-PRESS", takt_s=40.0, press_depth_m=0.005,
     force_min_n=6.0, feed_pos_tol_m=0.008,
-    description="冲压工位 P0' (蓝图 §13 首个工位)"))
+    description="压盖/冲压类工位力学抽象 (蓝图 §13 首个工位, §14 对标)"))
 for _r in ("L-B1", "L-B2"):
     bind_rack(_r, "ST-PRESS")
 #: 规划中的下一工位 (仅注册行 + 架位绑定, 无 MuJoCo 机构):
@@ -89,5 +93,5 @@ for _r in ("L-B1", "L-B2"):
 register_station(PressSpec(
     station_id="ST-WELD", takt_s=40.0, press_depth_m=0.005,
     force_min_n=6.0, feed_pos_tol_m=0.008, implemented=False,
-    description="规划工位 (P0' 不实现机构; 供追溯判例)"))
+    description="规划工位 (P0' 不实现机构; 供追溯判例, §14.1 占位谱系)"))
 bind_rack("L-B3", "ST-WELD")
