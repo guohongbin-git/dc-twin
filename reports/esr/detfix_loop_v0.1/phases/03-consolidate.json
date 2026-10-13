@@ -1,0 +1,8 @@
+{
+  "schema": "esr.loop_state/0.1",
+  "loop_id": "loop-detfix-001",
+  "beat": "consolidate",
+  "status": "done",
+  "at": "2026-10-13T15:49:47+00:00",
+  "skill_path": "/Users/guohongbin/1-Projects/dc-twin/reports/esr/detfix_loop_v0.1/knowledge/skills/INC-DETFIX-M2-001.skill.json"
+}

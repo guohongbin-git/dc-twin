@@ -1,0 +1,19 @@
+{
+  "schema": "esr.loop_state/0.1",
+  "loop_id": "loop-detfix-001",
+  "config": {
+    "loop_id": "loop-detfix-001",
+    "incident_dir": "/Users/guohongbin/1-Projects/dc-twin/tests/fixtures/esr/detfix_m2",
+    "workspace": "/Users/guohongbin/1-Projects/dc-twin/reports/esr/detfix_loop_v0.1"
+  },
+  "beats_done": [
+    "run",
+    "crystallize",
+    "consolidate",
+    "evolve",
+    "ablate"
+  ],
+  "status": "complete",
+  "beat_errors": {},
+  "updated": "2026-10-13T15:49:47+00:00"
+}

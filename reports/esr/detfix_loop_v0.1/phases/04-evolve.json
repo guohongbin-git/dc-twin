@@ -1,0 +1,13 @@
+{
+  "schema": "esr.loop_state/0.1",
+  "loop_id": "loop-detfix-001",
+  "beat": "evolve",
+  "status": "done",
+  "at": "2026-10-13T15:49:47+00:00",
+  "proposal_id": "PROP-INC-DETFIX-M2-001",
+  "gate_approved": true,
+  "rejections": [],
+  "registered": [
+    "event_kind:LANE_INTERLOCK"
+  ]
+}

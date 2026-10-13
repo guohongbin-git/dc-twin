@@ -1,0 +1,31 @@
+
+========================================================================
+② 经验结晶: crystallize(incident_dir) -> IncidentRecord
+========================================================================
+validate_semantics → PASS (schema+语义门)
+incident_id      : INC-DETFIX-M2-001
+根因假设         : F03 导航路径碾过 row:2 活跃拣选区 (lane-lock 导航到位即放、无联锁), 物理挤碰插入中的 F02 … (confidence=0.86)
+修复动作         : ['FIX-1 lane-lock 语义 (行线道岔联锁)', 'FIX-2 op_pin', 'FIX-3 op_unpin']
+回归用例         : [('REG-1', 'FIX-1'), ('REG-2', 'FIX-2'), ('REG-3', 'FIX-3')]
+证据契约修订     : amend / draft
+
+========================================================================
+①→⑤ ESR-Loop 五拍 (④=gate: 契约草案+消融子集+回归用例缺一拒绝)
+========================================================================
+status      : complete
+beats_done  : ('run', 'crystallize', 'consolidate', 'evolve', 'ablate')  (五拍: ('run', 'crystallize', 'consolidate', 'evolve', 'ablate'))
+gate 裁决   : approved=True registered=('event_kind:LANE_INTERLOCK',)
+消融验证    : passed=True cases=[('REG-1', True), ('REG-2', True), ('REG-3', True)]
+errors      : 无
+
+========================================================================
+落盘产物 (每拍持久化阶段记录 + 知识沉淀)
+========================================================================
+  knowledge/skills/INC-DETFIX-M2-001.skill.json
+  phases/01-run.json
+  phases/02-crystallize.json
+  phases/03-consolidate.json
+  phases/04-evolve.json
+  phases/05-ablate.json
+  state.json
+技能条目 (Voyager 式): skill.INC-DETFIX-M2-001 前置=6 执行=3 证据=['contract_revision', 'regression'] 后置=3

@@ -1,0 +1,14 @@
+{
+  "schema": "esr.loop_state/0.1",
+  "loop_id": "loop-detfix-001",
+  "beat": "run",
+  "status": "done",
+  "at": "2026-10-13T15:49:47+00:00",
+  "mode": "reuse_existing",
+  "incident_dir": "/Users/guohongbin/1-Projects/dc-twin/tests/fixtures/esr/detfix_m2",
+  "runs": [
+    "run12_y_recenter.json",
+    "run4_postfix.json",
+    "run9_pinfix.json"
+  ]
+}

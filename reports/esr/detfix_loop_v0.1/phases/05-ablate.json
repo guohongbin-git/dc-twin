@@ -1,0 +1,106 @@
+{
+  "schema": "esr.loop_state/0.1",
+  "loop_id": "loop-detfix-001",
+  "beat": "ablate",
+  "status": "done",
+  "at": "2026-10-13T15:49:47+00:00",
+  "passed": true,
+  "cases": [
+    {
+      "case_id": "REG-1",
+      "passed": true,
+      "results": [
+        {
+          "assert": {
+            "metric": "op_errors",
+            "op": "empty"
+          },
+          "ok": true,
+          "detail": "op_errors=[]"
+        },
+        {
+          "assert": {
+            "metric": "max_pen_m",
+            "op": "<=",
+            "value": 1.6e-05
+          },
+          "ok": true,
+          "detail": "max_pen_m=1.2e-05 le 1.6e-05"
+        },
+        {
+          "assert": {
+            "metric": "violations",
+            "op": "empty"
+          },
+          "ok": true,
+          "detail": "violations=[]"
+        },
+        {
+          "assert": {
+            "metric": "determinism_passed",
+            "op": "eq",
+            "value": true
+          },
+          "ok": true,
+          "detail": "determinism_passed=True eq True"
+        }
+      ]
+    },
+    {
+      "case_id": "REG-2",
+      "passed": true,
+      "results": [
+        {
+          "assert": {
+            "metric": "pin_hook_events",
+            "op": "eq",
+            "value": 0
+          },
+          "ok": true,
+          "detail": "pin_hook_events=0 eq 0"
+        },
+        {
+          "assert": {
+            "metric": "op_errors",
+            "op": "empty"
+          },
+          "ok": true,
+          "detail": "op_errors=[]"
+        }
+      ]
+    },
+    {
+      "case_id": "REG-3",
+      "passed": true,
+      "results": [
+        {
+          "assert": {
+            "metric": "drops_in_transit",
+            "op": "eq",
+            "value": 0
+          },
+          "ok": true,
+          "detail": "drops_in_transit=0 eq 0"
+        },
+        {
+          "assert": {
+            "metric": "all_complete",
+            "op": "eq",
+            "value": true
+          },
+          "ok": true,
+          "detail": "all_complete=True eq True"
+        },
+        {
+          "assert": {
+            "metric": "head_on_passed",
+            "op": "eq",
+            "value": true
+          },
+          "ok": true,
+          "detail": "head_on_passed=True eq True"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,109 @@
+{
+  "schema": "esr.skill_entry/0.1",
+  "skill_id": "skill.INC-DETFIX-M2-001",
+  "incident_id": "INC-DETFIX-M2-001",
+  "title": "多体接触发散故障链 (DetFix run1-16)",
+  "prerequisite": [
+    "根因假设: F03 导航路径碾过 row:2 活跃拣选区 (lane-lock 导航到位即放、无联锁), 物理挤碰插入中的 F02 (11-21N) → 叉横向偏 13mm → 托盘失稳坠地 → 空台对中跳过 → 底盘楔入 stand 墙 → QACC NaN 全场崩塌",
+    "机制: 叉偏 13mm 顶的是托盘中心板而非叉孔",
+    "机制: 微升离梁顶起甲板 → 托盘坠地 (级联 1: 空台 haul)",
+    "机制: 空台到达对中跳过 → 顶销盘与台面条带垫块重叠 → 拖拽底盘",
+    "机制: A04 底盘楔入 stand_H05 西墙 (3e9N 持续接触, 被困 100s+)",
+    "机制: A03 楔底滑入过度受力 → 求解器 QACC NaN → 全场校验废值"
+  ],
+  "procedure": [
+    {
+      "action_id": "FIX-1",
+      "target": "lane-lock 语义 (行线道岔联锁)",
+      "description": "job 持有期间活跃拣选区 lane 不释放 (释放前提 = 联锁事件入账)"
+    },
+    {
+      "action_id": "FIX-2",
+      "target": "op_pin",
+      "description": "对中夹 ±6mm (pad-hole 限制): pin-up z 带 0.088-0.092 与 pad bottom 0.091 重叠, |x|>6mm 即钩住"
+    },
+    {
+      "action_id": "FIX-3",
+      "target": "op_unpin",
+      "description": "卸放对正 (x/y 各吃孔游隙 + 悬吊 6mm 回平 + 台心前距 0.094 平移)"
+    }
+  ],
+  "evidence": {
+    "contract_revision": {
+      "revision_kind": "amend",
+      "summary": "证据契约补两节: (a) lane-lock 释放必须带联锁事件证据 (新事件类型 LANE_INTERLOCK); (b) 对中动作偏移量进 op 证据帧 (recenter_offset_mm)",
+      "status": "draft"
+    },
+    "regression": [
+      {
+        "case_id": "REG-1",
+        "scenario": "m2_matrix.8task.determinism",
+        "asserts": [
+          {
+            "metric": "op_errors",
+            "op": "empty"
+          },
+          {
+            "metric": "max_pen_m",
+            "op": "<=",
+            "value": 1.6e-05
+          },
+          {
+            "metric": "violations",
+            "op": "empty"
+          },
+          {
+            "metric": "determinism_passed",
+            "op": "eq",
+            "value": true
+          }
+        ]
+      },
+      {
+        "case_id": "REG-2",
+        "scenario": "m2_matrix.pin_cycle",
+        "asserts": [
+          {
+            "metric": "pin_hook_events",
+            "op": "eq",
+            "value": 0
+          },
+          {
+            "metric": "op_errors",
+            "op": "empty"
+          }
+        ]
+      },
+      {
+        "case_id": "REG-3",
+        "scenario": "m2_matrix.transit_drop",
+        "asserts": [
+          {
+            "metric": "drops_in_transit",
+            "op": "eq",
+            "value": 0
+          },
+          {
+            "metric": "all_complete",
+            "op": "eq",
+            "value": true
+          },
+          {
+            "metric": "head_on_passed",
+            "op": "eq",
+            "value": true
+          }
+        ]
+      }
+    ]
+  },
+  "postcondition": [
+    "跨车接触 (11N 级) 不再侵入活跃装配区, 叉偏根因消除",
+    "pin-hook 边际干涉消除",
+    "dock 卸放漂移消除, boss 不撞 pad 边"
+  ],
+  "provenance": {
+    "source": "agv-warehouse-demo reports/detfix + docs/knowledge/detfix_fault_chain.md (M2 矩阵仓库 8 车压测, seed=7 determinism)",
+    "crystallized_at": "2026-10-13T15:49:47+00:00"
+  }
+}
