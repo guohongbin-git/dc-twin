@@ -108,10 +108,12 @@ class StationGeometry:
                 A(f'    <geom name="fixt_{sid}_nest_{sx:.3f}_{sy:.3f}" '
                   f'type="box" pos="{x + sx:.3f} {sy:.3f} {PLANE_Z - 0.002:.4f}" '
                   f'size="0.011 0.023 0.002" rgba="0.32 0.46 0.52 1"/>')
-        # nest 背止挡 (面 = 止点 +0.030, 托板底面接触定位)
-        A(f'    <geom name="fixt_{sid}_stop_nest" type="box" '
-          f'pos="{x:.3f} {ny + 0.035:.3f} {PLANE_Z - 0.0015:.4f}" '
-          f'size="0.055 0.005 0.0025" rgba="0.85 0.30 0.20 1"/>')
+        # nest 背止挡 → 双块 (x ±0.0625): 携托凸台 (x ±0.020, 底 0.046)
+        # 从块间通过, 托板北面 (x ±0.055) 顶靠块内档 2.4525 定位
+        for sx in (-0.0625, 0.0625):
+            A(f'    <geom name="fixt_{sid}_stop_nest_{sx:.2f}" type="box" '
+              f'pos="{x + sx:.3f} {ny + 0.035:.3f} {PLANE_Z - 0.0015:.4f}" '
+              f'size="0.015 0.005 0.0025" rgba="0.85 0.30 0.20 1"/>')
         # 冲压门架 (portal 立柱距 A02 摆线 x=2.50 恒 0.16)
         for sx in (-0.16, 0.16):
             A(f'    <geom name="fixt_{sid}_leg_{sx:.2f}" type="box" '
@@ -370,7 +372,7 @@ class LineCell(WarehouseCell):
         bodies.append(_bench_xml_x(
             "out", OUT_Y, OUT_X - 0.05,
             OUT_X + OUT_PITCH * max(1, n_out - 1) + 0.05,
-            corridor_ys=(OUT_Y, 2.80)))
+            corridor_ys=(OUT_Y, 3.30)))
         plan = self._pallet_plan()
         for name, x, y in plan:
             bodies.append(_pallet_slim_xml(name, x, y, PLANE_Z))
