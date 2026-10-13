@@ -104,6 +104,6 @@
   ],
   "provenance": {
     "source": "agv-warehouse-demo reports/detfix + docs/knowledge/detfix_fault_chain.md (M2 矩阵仓库 8 车压测, seed=7 determinism)",
-    "crystallized_at": "2026-10-13T15:49:47+00:00"
+    "crystallized_at": "2026-10-13T15:51:12+00:00"
   }
 }
