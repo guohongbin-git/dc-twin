@@ -75,7 +75,7 @@ def test_finished_pallets_reach_outbound(run):
     truth = run.truth
     assert len(truth["finished"]) >= 1                # 成品托盘出工位
     for f in truth["finished"]:
-        assert f["out_slot"][1] < 2.45                # 产出门架列
+        assert f["out_slot"][1] > 2.9                 # 产出行 y=3.02 (出门架)
 
 
 def test_physics_clean_no_penetration(run):

@@ -4,7 +4,7 @@
 - 只读独立导出的真值轨迹 (truth.json) + 持久化台账事件日志/快照
   (line_ledger.json) + 运行时证据 (evidence_events.json);
 - **不调用被测系统业务判定函数**, 不 import dc_twin 运行时/账本/
-  场景模块, 不 import sim.*/services.* (纯 JSON 规则核验);
+  场景模块, 不 import 任何仿真/服务业务模块 (纯 JSON 规则核验);
 - 产量对账: 工位物理完成数 (truth.cycles, 力达标) vs 账本提交数;
 - 物料追溯: pallet_id → 交付架位 (绑定工位) → 工位 operation_id;
 - 六负向判: 空料上料 / 伪造工序完成 / 未夹紧动作 / 节拍超时未报 /
@@ -17,7 +17,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-RULE_VERSION = "dc_twin.line_oracle/1"
+RULE_VERSION = "dc_twin.prodline_oracle/1"
 
 VERDICT_CONSISTENT = "CONSISTENT"
 V_FORGED = "MISMATCH_FORGED_OPERATION"

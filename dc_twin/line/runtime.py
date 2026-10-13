@@ -11,15 +11,17 @@
 forge_op / duplicate_feed / unclamped_press / takt_timeout_unreported /
 wrong_station_feed。
 
-AGV 车道分离 (无平面交叉): 供料 A02 列 x=2.10/2.31/2.50; 清型
-A03 线 x=1.90/2.50 行 y=3.02。结构立柱距 AGV 停位点 ≥0.16。
+AGV 车道分离 (无平面交叉): 供料 A02 西列 x=2.17 (让位 L-B1 门腿柱
+2.31, 底盘缘净 10mm) / 投放列 x=2.50; 清型 A03 拾取停位 x=2.43,
+产出行 y=3.02 (越顶搬运 y=3.30)。暂存支承/条带孔位与 AGV 停位让
+空 ≥0.16 (销盘缘/凸台不触)。
 
-已知边界 (P0'.5): 顶升焊 (lift_*) 在隔离探针中 Z 向拾取与最小模型
-拖曳均验证通过, 但多体场景下 (位置伺服保持的底盘 + noslip=20) 携
-托 X/Y 拖曳未联动 —— 托盘滞留拾取位, 投放落点偏移, 工位接触力为
-零; 根因定位到 weld 约束与底盘位置伺服 (30N 封顶) 的力路交互。
-替代闭环 (已验证): 台账/证据/评分器以「投料=nest 账面落座」记账,
-物理拾放联动留 P0'.5。
+携托联动 (P0'.5 修复): 顶升焊拾取确认后, 托盘切换 **mocap 从动**
+(_CarrySlave: 位姿逐步拷贝 = 载体位形 + 携托偏移, weld 退出力路)
+—— 多体场景 weld ∥ 底盘位置伺服 (30N 封顶) ∥ 销盘 noslip=20 三方
+对抗不可收敛的根因因位姿不再经由约束求解而消解; 与 BerthTruck 同
+一抽象 (mocap 规格下货物锁止)。落托确认后恢复动力学体 (落座稳定
+窗), 台账/证据/评分器「投料=nest 物理落座」与账实一体。
 """
 from __future__ import annotations
 
@@ -28,6 +30,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+import mujoco
 import numpy as np
 
 from sim.controllers import Ramp
@@ -43,7 +46,8 @@ from .plc import LinePlc
 from .publisher import LineStatePublisher, resolve_state_path
 from .pull import ReplenishOrder, TaktKanban
 from .registry import rack_bindings, station as _station_spec
-from .scene import (PLANE_Z, PRESS_Q_TARGET, WP_HALF_XYZ, LineCell)
+from .scene import (LPAL_TOP_DZ, PLANE_Z, PRESS_Q_TARGET, WP_HALF_XYZ,
+                    LineCell, _quat_conj, _quat_mul)
 
 CARRIER = "A02"                # 供料 AGV (暂存 → L-B)
 CLEARER = "A03"                # 清型 AGV (出口 → 产出门架)
@@ -64,9 +68,6 @@ def _pin_seg(view, up: bool) -> dict:
                     view.off["pin"], 0.20)}
 TRUNK_S_Y = 1.60               # A02 南干道
 CLEAR_Y = 2.80                 # A03 北干道
-#: 清型出发延迟 = 出料推完 (程序 ≈22.5s) 前先行 21.8s, 到出口
-#: ≈22.9s (余量 ~0.6s; 定长段 → 时序确定性)
-CLEAR_DELAY_S = 21.8
 FEED_RACK = "L-B1"             # ST-PRESS 主供料位
 FAULT_K = 1                    # 负向注入生效拍 (第 2 拍)
 FRAME_DT = 0.05                # 证据帧采样间隔
@@ -153,35 +154,193 @@ def _advance(cell, t_target: float) -> None:
 
 def _seg(view, axis: str, target: float, *, speed: float = HAUL_SPEED,
          accel: float = HAUL_ACC, settle: float = 0.15,
-         carry: bool = False) -> dict:
+         carry: bool = False, probe=None) -> dict:
     if carry:
         speed, accel, settle = CARRY_SPEED, CARRY_ACC, CARRY_SETTLE
-    return {"seg": (*view.seg(axis, target, speed, accel), settle)}
+    out = {"seg": (*view.seg(axis, target, speed, accel), settle)}
+    if probe is not None:
+        out["probe"] = probe
+    return out
+
+
+def _wait_static(cell, bid: int, *, tol_mps: float = 5e-3,
+                 timeout_s: float = 2.0) -> None:
+    """等刚体物理静止 (落座稳定窗; P0 同制式, 上界受监控)。``bid``:
+    自由铰刚体 id。"""
+    m = cell.model
+    jadr = m.jnt_dofadr[m.body_jntadr[bid]]
+    t_end = cell.data.time + timeout_s
+    while cell.data.time < t_end:
+        if float(np.linalg.norm(cell.data.qvel[jadr:jadr + 3])) < tol_mps:
+            return
+        cell.step(10)
+
+
+class _CarrySlave:
+    """携托 mocap 从动 (P0'.5 携托联动修复; 与 BerthTruck 同一抽象:
+    「mocap 规格下货物锁止」)。
+
+    拾取确认 (grip weld 激活) 后捕获「携托偏移」(底盘局部系 relpos/
+    relquat, 与 clamp/grip weld 同配方; 货物 = 托盘 + 坐顶工件 刚性
+    整体), 随即失活 weld、切换从动: 每步将货物全体 6-DOF 位姿/速度
+    逐步拷贝 = 载体位形 + 偏移 (trucks.py 的 mocap 驱动同源 —— mocap
+    体无速度场, 位姿即受控量)。weld ∥ 底盘位置伺服 (kp500/30N 封顶)
+    ∥ 销盘 noslip=20 三方对抗、多体不收敛的根因, 因货物位姿不再经
+    由约束求解而消解; 工件须同列从动 (运动学位姿驱动下接触摩擦不携
+    运 —— 最小模型实测, 与 weld 约束携带是两类机制)。落托确认后恢
+    复动力学体 (从动速度清零 + 落座稳定窗), 货物重新参与接触/夹紧/
+    冲压力路。
+    """
+
+    def __init__(self, cell, vid: str, pallet: str):
+        self.cell, self.vid, self.pallet = cell, vid, pallet
+        m, T = cell.model, mujoco.mjtObj
+        self._chassis_bid = mujoco.mj_name2id(
+            m, T.mjOBJ_BODY, f"{vid}_chassis")
+        cj = m.body_jntadr[self._chassis_bid]         # x/y/yaw 连续 dof
+        self._cjadr = int(m.jnt_dofadr[cj])
+        self._bodies: list[tuple[int, int, int]] = []   # (bid, qadr, dadr)
+        self._weld = cell.lift_welds[vid, pallet]
+        self._off: list = []                            # (relpos 局部, relquat)
+        self._zbias = 0.0                               # 从动抬升 (落座落差)
+
+    @property
+    def active(self) -> bool:
+        return bool(self._off)
+
+    def pickup(self, lift: float = 0.0) -> None:
+        """拾取确认 → 捕获携托偏移 → 切 mocap 从动 (weld 失活)。
+
+        ``lift``: 从动抬升 (m) —— 同高托举 (拾/落位支承顶等高) 时给出
+        落座落差, 使落托为实接触承载 (z 逐字拷贝 = 支承面零穿透, 触
+        点不生成)。"""
+        cell = self.cell
+        cell.grip(self.vid, self.pallet, True)
+        assert cell.grip_active(self.vid, self.pallet)        # 拾取确认
+        m, d = cell.model, cell.data
+        b1 = self._chassis_bid
+        r1 = d.xmat[b1].reshape(3, 3)
+        names = [self.pallet] + [
+            w for w, info in cell.workpieces.items()
+            if info["pallet"] == self.pallet]
+        for name in names:
+            info = cell.pallets[name] if name == self.pallet \
+                else cell.workpieces[name]
+            bid = info.bid if name == self.pallet else info["bid"]
+            pj = m.body_jntadr[bid]                   # 自由铰 (唯一)
+            b2 = d.xpos[bid]
+            self._bodies.append(
+                (bid, int(m.jnt_qposadr[pj]), int(m.jnt_dofadr[pj])))
+            self._off.append((r1.T @ (b2 - d.xpos[b1]),
+                              _quat_mul(_quat_conj(d.xquat[b1]),
+                                        d.xquat[bid])))
+        d.eq_active[self._weld] = 0           # 从动接管, weld 退出力路
+        self._zbias = float(lift)
+
+    def slave(self, _t: float = 0.0) -> None:
+        """每步从动钩子 (挂携托段 probe 槽): 位姿 ← 载体 + 偏移。"""
+        if not self._off:
+            return
+        d = self.cell.data
+        b1 = self._chassis_bid
+        p1, r1, q1 = d.xpos[b1], d.xmat[b1].reshape(3, 3), d.xquat[b1]
+        v = d.qvel[self._cjadr:self._cjadr + 3]       # vx, vy, ωz
+        for (bid, qadr, dadr), (roff, rq) in zip(self._bodies, self._off):
+            d.qpos[qadr:qadr + 3] = p1 + r1 @ roff
+            d.qpos[qadr + 2] += self._zbias
+            d.qpos[qadr + 3:qadr + 7] = _quat_mul(q1, rq)
+            d.qvel[dadr:dadr + 3] = (v[0], v[1], 0.0)
+            d.qvel[dadr + 3:dadr + 6] = (0.0, 0.0, v[2])
+
+    def release(self) -> None:
+        """落托确认 → 缓降至支承触点生成 → 恢复动力学体 + 稳定窗。
+
+        0.05 m/s 匀速下插, 求解器顶起 (接触生成) 即停 —— 消除等高托
+        举「零接触悬停」与 20mm 自由落座冲击, 落座无过盈无弹跳。"""
+        bodies, self._off = self._bodies, []
+        self.cell.grip(self.vid, self.pallet, False)
+        d = self.cell.data
+        self._zbias = 0.0
+        step_dz = 5e-5
+        _b0, qadr0, dadr0 = bodies[0]
+        n_max = 3 * int(abs(float(d.qpos[qadr0 + 2]) - PLANE_Z) / step_dz) + 60
+        for _ in range(n_max):
+            z = float(d.qpos[qadr0 + 2])
+            if z <= PLANE_Z + step_dz:
+                break
+            for _bid, qadr, _dadr in bodies:
+                d.qpos[qadr + 2] -= step_dz   # 货物刚性整体同降
+            self.cell.step(1)
+            if float(d.qvel[dadr0 + 2]) > 1e-4:
+                break                         # 支承触点生成 (求解器顶起)
+        for _bid, _qadr, dadr in bodies:
+            d.qvel[dadr:dadr + 6] = 0.0           # 从动速度残余清零
+        for bid, _qadr, _dadr in bodies:
+            _wait_static(self.cell, bid)
+
+
+def _seed_nest(cell, pallet: str, wp: str) -> None:
+    """期初物理落位: 首供托盘 + 工件直置 nest (台账「L-B1 交付」的
+    物理位 = 工位 nest; rack 预载位仅场景播种)。传送后落座稳定。"""
+    m, d = cell.model, cell.data
+    nr = cell.nest_rect("ST-PRESS")
+    x, y = (nr[0] + nr[1]) / 2, PLACE_Y
+    bids = [cell.pallets[pallet].bid, cell.workpieces[wp]["bid"]]
+    for name, bid, z in ((pallet, bids[0], PLANE_Z),
+                         (wp, bids[1],
+                          PLANE_Z + LPAL_TOP_DZ + WP_HALF_XYZ[2])):
+        qadr = m.jnt_qposadr[m.body_jntadr[bid]]
+        dadr = m.jnt_dofadr[m.body_jntadr[bid]]
+        d.qpos[qadr + 0:qadr + 2] = (x, y)
+        d.qpos[qadr + 2] = z
+        d.qvel[dadr:dadr + 6] = 0.0
+    for bid in bids:
+        _wait_static(cell, bid, timeout_s=1.0)
 
 
 IDLE_XY = (1.85, 2.60)       # A02 待命位 (西列; A03 待命 (1.90,3.02))
 A03_IDLE_XY = (1.85, 3.02)   # A03 待命位 (产出行西端)
-#: 拾取偏置 (AGV 停位点 − 槽位中心): 盘缘/凸台不触槽内支承
-PICK_OFFSET_X = 0.20
+#: 拾取偏置 (AGV 停位点 − 槽位中心): 盘缘/凸台不触槽内支承, 且携托
+#: 北行 x=2.17 列让位 L-B1 门腿柱 x=2.31 (底盘缘 2.29, 净 10mm)
+PICK_OFFSET_X = 0.33
 #: nest 投放 y (AGV 摆位): 托盘北面顶靠背止挡面 (止挡面 = 2.355,
 #: 板半宽 0.027 → 摆位 2.328), 位置精度 = y 伺服 ±2mm < 容差 8mm
 PLACE_Y = 2.328
+#: A03 清型停位/投放补偿 (拾取停位 (2.43, 2.475) → 携托偏移
+#: (+0.07, −0.147); 投放 = 槽位 + 偏移反解, 落点 = out_slot 精确位)
+CLEAR_PICK_XY = (2.43, 2.475)
+CLEAR_OFF = (0.07, 2.475 - PLACE_Y)
+#: 从动抬升 (m): 凸台底悬挂 origin−0.030, 抬升须令凸台底越过多体路
+#: 径上的条带/块顶 (0.075) —— 滑行越障而非零距穿缝; 上界 = 工件顶
+#: 距冲压头静位 (0.130) 的净空 → 0.126
+FEED_LIFT_M = 0.015            # 暂存 0.095 → 0.110 (凸台底 0.080)
+CLEAR_LIFT_M = 0.035           # nest 0.075 → 0.110 (凸台底 0.080)
+#: 清型出发延迟: 工位程序 ≈9s 收尾 → A03 先取成品 (程序无夹紧冲突);
+#: A03 投出 nest 净空 ≈+11.8s → A02 延迟 5.5s (到位 ≈+13.9s) 后投
+#: 下料 —— nest 单 LOW 位, 取空再投 (定长段 → 时序确定性)
+CLEAR_DELAY_S = 6.0
+FEED_DELAY_S = 5.5
+#: A03 越顶搬运高度 (AGV y): 携托悬于产出行坐托 (y≈3.15) 北侧上空
+#: 东行, 不跨已落位 (西行永不跨位语义 → 越顶等效)
+CLEAR_OVER_Y = 3.30
 
 
 def _feed_trip_items(cell, view, *, pallet, slot_xy, nest_y) -> tuple[list, dict]:
-    """A02 供料环 (西列 x=2.10 / 投放列 x=2.50 双列制): 待命 → 南下暂
-    存行 sy (空车: 销盘顶 0.064 < 支承顶 0.075, 净空 11mm) → 东 0.20m
-    拾取位 (盘缘距槽内支承 60mm) → 顶升焊拾取 (刚性联载) → 西退 (凸台
-    穿槽对间隙 12.5mm) → 北上 nest (携托板底 0.076 > 北行诸结构顶
-    0.075, 净空 1mm = P0 同链; 北行诸槽已取空) → 背止挡定位落座 →
-    南归位。"""
+    """A02 供料环 (西列 x=2.17 / 投放列 x=2.50 双列制): 待命 → 南下暂
+    存行 sy (空车: 销盘顶 0.064 < 支承顶 0.075, 净空 11mm) → 东至拾取
+    位 x=2.17 (盘缘距槽内支承 60mm; 北行列让位 L-B1 门腿柱 2.31) →
+    顶升焊拾取 (mocap 从动联载, _CarrySlave) → 北上 nest (托盘 x=2.50
+    凸台穿条带孔位, 净空 1mm = P0 同链; 北行诸槽已取空) → 背止挡定位
+    落座 (恢复动力学体 + 稳定窗, 落差 20mm) → 南归位。"""
     sy = slot_xy[1]
+    slave = _CarrySlave(cell, CARRIER, pallet)
     items = [_seg(view, "y", sy),
-             _seg(view, "x", 2.30),
-             {"do": lambda: cell.grip(CARRIER, pallet, True)},
-             _seg(view, "x", 2.50 - PICK_OFFSET_X, carry=True),
-             _seg(view, "y", PLACE_Y, carry=True),
-             {"do": lambda: cell.grip(CARRIER, pallet, False)},
+             _seg(view, "x", 2.50 - PICK_OFFSET_X),
+             {"do": lambda: slave.pickup(FEED_LIFT_M)},
+             _seg(view, "x", 2.50 - PICK_OFFSET_X, carry=True,
+                  probe=slave.slave),
+             _seg(view, "y", PLACE_Y, carry=True, probe=slave.slave),
+             {"do": slave.release},
              _seg(view, "y", IDLE_XY[1], carry=True)]
     hook = {"t": None}
     items[-1]["after"] = lambda: hook.__setitem__("t", cell.data.time)
@@ -189,17 +348,23 @@ def _feed_trip_items(cell, view, *, pallet, slot_xy, nest_y) -> tuple[list, dict
 
 
 def _clear_trip_items(cell, view, *, pallet, out_xy) -> tuple[list, dict]:
-    """A03 清型环: 待命 (1.90,3.02) → 东 x=2.50 → 南下 nest 北缘
-    2.475 (盘北面 2.352, 停距 120mm) → 顶升焊拾取成品托 → 北归行 3.02
-    (携托板底 0.076 > 行顶 0.075, 净空 1mm) → 东延槽位落托 (东满优
-    先, 西行永不跨已落位) → 西归位。"""
+    """A03 清型环: 待命 (1.85,3.02) → 东 x=2.43 → 南下 nest 北缘
+    2.475 (盘北面 2.352, 停距 120mm) → 顶升焊拾取成品托 (mocap 从动
+    联载, _CarrySlave) → 北上越顶 (AGV y=3.30, 携托悬于产出行坐托
+    北侧上空) → 东延槽位 x (不跨已落位) → 南落产出行 (托盘 y=3.02
+    双轨承托, 恢复动力学体 + 稳定窗) → 西归位。"""
     ox, oy = out_xy
-    items = [_seg(view, "x", 2.50),
-             _seg(view, "y", 2.475),
-             {"do": lambda: cell.grip(CLEARER, pallet, True)},
-             _seg(view, "y", oy, carry=True),
-             _seg(view, "x", ox, carry=True),
-             {"do": lambda: cell.grip(CLEARER, pallet, False)},
+    px_, py_ = CLEAR_PICK_XY
+    slave = _CarrySlave(cell, CLEARER, pallet)
+    items = [_seg(view, "x", px_),
+             _seg(view, "y", py_),
+             {"do": lambda: slave.pickup(CLEAR_LIFT_M)},
+             _seg(view, "y", CLEAR_OVER_Y, carry=True, probe=slave.slave),
+             _seg(view, "x", ox - CLEAR_OFF[0], carry=True,
+                  probe=slave.slave),
+             _seg(view, "y", oy + CLEAR_OFF[1], carry=True,
+                  probe=slave.slave),
+             {"do": slave.release},
              _seg(view, "x", A03_IDLE_XY[0])]
     hook = {"t": None}
     items[-1]["after"] = lambda: hook.__setitem__("t", cell.data.time)
@@ -262,8 +427,12 @@ def _program_items(cell, h, *, pallet, wp, spec, faults, k, st,
         st["t_press_bottom"] = cell.data.time
         if wp is not None:
             wpos = cell.wp_pose(wp)[0]
+            # nest 坐托工件 z 窗: 托盘顶 0.085 + 半高 0.003 = 0.088
+            # (冲压刚性压入 2mm → 0.086; 窗口留落座/压制余量)
             st["wp_in_nest"] = bool(_in_rect(wpos, h.geo.nest_rect())
-                                    and 0.10 <= float(wpos[2]) <= 0.16)
+                                    and PLANE_Z + LPAL_TOP_DZ - 4e-3
+                                    <= float(wpos[2])
+                                    <= PLANE_Z + LPAL_TOP_DZ + 6e-3)
         else:
             st["wp_in_nest"] = False
         st["clamp_at_press"] = (cell.clamp_active(pallet)
@@ -295,7 +464,9 @@ def _program_items(cell, h, *, pallet, wp, spec, faults, k, st,
         {"do": do_finish},
     ]
     if takt_hold:
-        items.append({"hold": 0.55 * spec.takt_s})
+        # 超时节拍保持: 程序基线 ≈8s, 保持 1.15×takt 使 cycle_s 必然
+        # 越窗 (账面仍声称 0.8×takt 窗内 → V_TAKT 可判)
+        items.append({"hold": 1.15 * spec.takt_s})
     items += [
         {"seg": (h.press_aid,
                  lambda: Ramp(h.q_press(cell), 0.0, spec.press_speed_mps,
@@ -490,6 +661,7 @@ def run_line(*, faults=(), out_dir=None, horizon_s: float = 1800.0,
     cell.warmup(0.5)
     feed_v, clear_v = cell.veh[CARRIER], cell.veh[CLEARER]
     h = cell.presses["ST-PRESS"]
+    _seed_nest(cell, "pl_000", "wp_000")   # 期初: 首供托盘物理在位 (L-B1)
 
     # takt 看板 → DemandEngine pull 源 (core 可扩展点; 引擎只管归并)
     kanban = TaktKanban(station_id="ST-PRESS", takt_s=takt, t0_s=t0_s,
@@ -506,7 +678,8 @@ def run_line(*, faults=(), out_dir=None, horizon_s: float = 1800.0,
     stock[FEED_RACK].append("pl_000")
     stock["L-B2"].append("pl_001")
     for node, p in ((FEED_RACK, "pl_000"), ("L-B2", "pl_001")):
-        ledger.record_delivery(p, node, t_s=cell.data.time)   # 期初建账
+        ledger.record_delivery(p, node, t_s=cell.data.time,
+                               station_bound=rack_bindings().get(node))
     staged_idx = 0
     wp_of = {d["pallet"]: w for w, d in cell.workpieces.items()}
 
@@ -530,7 +703,10 @@ def run_line(*, faults=(), out_dir=None, horizon_s: float = 1800.0,
             "t_s": round(cell.data.time, 4)})
     events_out: list[dict] = []
     seq = {"n": 0}
-    exit_pallet: tuple[str, str] | None = None   # (pallet, wp) 待清型
+    # nest 单 LOW 位占用账 (种子托盘即首件在制): haul_k = 本拍派出清
+    # 型的托盘; nest["hold"] = nest 内在制/待取托盘 (供料投放的门)
+    haul_k: str | None = None
+    nest: dict = {"hold": "pl_000"}
     phases: dict = {"station": "idle", "carrier": "idle", "clearer": "idle",
                     "part": None, "op": None}
     live = _LiveState(cell, takt, stock, plc, ledger, truth, events_out,
@@ -643,6 +819,9 @@ def run_line(*, faults=(), out_dir=None, horizon_s: float = 1800.0,
                                   for t, f in st["forces"][::4]]})
 
         chans = _Channels(cell)
+        hold = (1.15 * spec.takt_s
+                if "takt_timeout_unreported" in faults and k == FAULT_K
+                else 0.0)
         # ---- 工位通道 (有料 / 空料伪造程序)
         if pallet is not None or forged_empty:
             plc.issue(st["op_id"])
@@ -656,10 +835,34 @@ def run_line(*, faults=(), out_dir=None, horizon_s: float = 1800.0,
             pass                          # 伪造: 无物理程序, 仅账面/证据
         else:
             truth["stoppage_ticks"].append(k)
-        # ---- A02 供料通道 (空料注入: 跳过首拍补料)
+        # ---- A03 清型通道 (本拍成品即取: 延迟越过程序收尾, 同拍腾空
+        # nest → 供料投放不叠载)
+        if pallet is not None:
+            haul_k = pallet
+            nest_hold = None              # 派出即腾空 (时序由延迟保证)
+            slot_j = len(truth["finished"])
+            items, hook = _clear_trip_items(
+                cell, clear_v, pallet=haul_k,
+                out_xy=cell.out_slot(slot_j))
+
+            def _cleared(hook=hook, pal_c=haul_k, wp_c=wp, slot_j=slot_j):
+                t = hook["t"] or cell.data.time
+                truth["finished"].append({
+                    "pallet_id": pal_c, "workpiece_id": wp_c,
+                    "t_exit": round(t, 4),
+                    "out_slot": list(cell.out_slot(slot_j))})
+            items[-1]["after"] = _cleared
+            items.insert(0, {"do": lambda: phases.__setitem__(
+                "clearer", f"clear:{haul_k}→out{slot_j}")})
+            items.insert(len(items) - 1, {"do": lambda: phases.__setitem__(
+                "clearer", "idle")})
+            chans.add(items, delay=CLEAR_DELAY_S + hold)
+        # ---- A02 供料通道 (空料注入: 跳过首拍补料; nest 待压/待取
+        # 占用时持料等下一拍 —— 单 LOW 位不叠载)
         skip_feed = k == 0 and "empty_rack_feed" in faults
+        nest_free = nest["hold"] is None or nest["hold"] == haul_k
         p_next = staged[staged_idx] if staged_idx < len(staged) else None
-        if p_next is not None and not skip_feed:
+        if p_next is not None and not skip_feed and nest_free:
             dest = ("L-B3" if k == FAULT_K
                     and "wrong_station_feed" in faults else FEED_RACK)
             items, hook = _feed_trip_items(
@@ -671,7 +874,9 @@ def run_line(*, faults=(), out_dir=None, horizon_s: float = 1800.0,
 
             def _delivered(hook=hook, pal=pal, dst=dst, ordf=ordf):
                 t = hook["t"] or cell.data.time
-                ledger.record_delivery(pal, dst, t_s=t)
+                nest["hold"] = pal         # 投放入位
+                ledger.record_delivery(pal, dst, t_s=t,
+                                       station_bound=rack_bindings().get(dst))
                 stock[dst].append(pal)
                 truth["deliveries"].append({
                     "pallet_id": pal, "order_id": ordf.order_id,
@@ -684,27 +889,7 @@ def run_line(*, faults=(), out_dir=None, horizon_s: float = 1800.0,
                 "carrier", f"feed:{pal}→{dst}")})
             items.insert(len(items) - 1, {"do": lambda: phases.__setitem__(
                 "carrier", "idle")})
-            chans.add(items)
-        # ---- A03 清型通道 (上一拍出料成品)
-        if exit_pallet is not None:
-            pal_c, wp_c = exit_pallet
-            slot_j = len(truth["finished"])
-            items, hook = _clear_trip_items(
-                cell, clear_v, pallet=pal_c,
-                out_xy=cell.out_slot(slot_j))
-
-            def _cleared(hook=hook, pal_c=pal_c, wp_c=wp_c, slot_j=slot_j):
-                t = hook["t"] or cell.data.time
-                truth["finished"].append({
-                    "pallet_id": pal_c, "workpiece_id": wp_c,
-                    "t_exit": round(t, 4),
-                    "out_slot": list(cell.out_slot(slot_j))})
-            items[-1]["after"] = _cleared
-            items.insert(0, {"do": lambda: phases.__setitem__(
-                "clearer", f"clear:{pal_c}→out{slot_j}")})
-            items.insert(len(items) - 1, {"do": lambda: phases.__setitem__(
-                "clearer", "idle")})
-            chans.add(items, delay=CLEAR_DELAY_S)
+            chans.add(items, delay=FEED_DELAY_S + hold)
         chans.run(t0=t_tick)
         if pub is not None:
             pub.maybe_publish(cell.data.time)
@@ -744,13 +929,12 @@ def run_line(*, faults=(), out_dir=None, horizon_s: float = 1800.0,
                              in_window=True)
             ledger.ack_op(op_id, t_s=t_dec + 0.2)
             ledger.snapshot(t_s=t_dec + 0.2)
-        if st.get("program_ran") and pallet is not None:
-            exit_pallet = (pallet, wp)
 
     _advance(cell, cell.data.time + 0.5)
-    if exit_pallet is not None:
-        truth["exit_residual"] = {"pallet_id": exit_pallet[0],
-                                  "workpiece_id": exit_pallet[1],
+    if nest["hold"] is not None:
+        # 残留: nest 内在制未取托盘 (负向注入路径的悬挂在制品)
+        truth["exit_residual"] = {"pallet_id": nest["hold"],
+                                  "workpiece_id": wp_of.get(nest["hold"]),
                                   "t": round(cell.data.time, 4)}
     truth["pallets_final"] = {
         p: [round(float(v), 5) for v in cell.pallet_pose(p)[0]]

@@ -5,6 +5,7 @@ from __future__ import annotations
 import mujoco
 import pytest
 
+from dc_twin.line.runtime import _CarrySlave
 from dc_twin.line.scene import LineCell, run_segments
 
 
@@ -71,14 +72,30 @@ def _seg(view, axis, target, *, speed=0.30, accel=0.20, settle=0.15,
     return (*view.seg(axis, target, speed, accel), settle)
 
 
+def _carry(c, slave, segs):
+    """runtime _Channels 的携托从动步进 (单通道版; 每步 先设 ctrl/
+    从动拷贝 后步进, 与通道执行器同序)。"""
+    sub = max(1, round(0.01 / c.model.opt.timestep))
+    for aid, build, off, settle in segs:
+        ramp, t0 = build(), c.data.time
+        while c.data.time - t0 < ramp.duration + settle:
+            te = c.data.time - t0
+            c.data.ctrl[aid] = (ramp.at(te) if te < ramp.duration
+                                else ramp.target) - off
+            slave.slave(c.data.time)
+            c.step(sub)
+
+
 def _nest_pl000(c):
     """测试工装: 顶升焊携托直投 nest 的末段 (拾取后北送落座), 与
-    runtime 供料环同制式; pl_000 以预载位为拾取位。"""
+    runtime 供料环同制式 (mocap 从动联载); pl_000 以预载位为拾取
+    位。"""
     v = c.veh["A02"]
-    run_segments(c, [_seg(v, "x", 2.19), _seg(v, "y", 1.94)])
-    c.grip("A02", "pl_000", True)                    # 拾取位 = 槽西南 (0.31, 0.16)
-    run_segments(c, [_seg(v, "y", 2.328 - 0.16, carry=True)])
-    c.grip("A02", "pl_000", False)
+    run_segments(c, [_seg(v, "x", 2.17), _seg(v, "y", 1.94)])
+    slave = _CarrySlave(c, "A02", "pl_000")
+    slave.pickup(0.035)          # 拾取位 = 槽西南 (0.33, 0.16); 抬 35mm 越唇口
+    _carry(c, slave, [_seg(v, "y", 2.328 - 0.16, carry=True)])
+    slave.release()
 
 
 def test_clamped_press_builds_force_profile(cell):

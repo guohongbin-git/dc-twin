@@ -369,68 +369,6 @@ class LineCell(WarehouseCell):
     def pallet_of_wp(self, wp: str) -> str:
         return self.workpieces[wp]["pallet"]
 
-    def geom_manifest(self) -> dict:
-        """MJCF→three.js 几何镜像 (PanelTab schema v1; mujoco 约定
-        half-size, 世界系 pos/quat 对静态体 = local; 动态体 dyn=true,
-        每帧位姿走 dyn_geoms 按体驱动)。非原生 type (mesh/hfield) 跳过。"""
-        m, d, T = self.model, self.data, mujoco.mjtObj
-        mtype = {int(mujoco.mjtGeom.mjGEOM_PLANE): "plane",
-                 int(mujoco.mjtGeom.mjGEOM_SPHERE): "sphere",
-                 int(mujoco.mjtGeom.mjGEOM_CAPSULE): "capsule",
-                 int(mujoco.mjtGeom.mjGEOM_CYLINDER): "cylinder",
-                 int(mujoco.mjtGeom.mjGEOM_BOX): "box"}
-        skip = {int(mujoco.mjtGeom.mjGEOM_MESH),
-                int(mujoco.mjtGeom.mjGEOM_HFIELD),
-                int(mujoco.mjtGeom.mjGEOM_ELLIPSOID),
-                int(mujoco.mjtGeom.mjGEOM_SDF)}
-        geoms, dyn_bodies = [], {}
-        for g in range(m.ngeom):
-            if int(m.geom_type[g]) in skip:
-                continue
-            bid = int(m.geom_bodyid[g])
-            body = mujoco.mj_id2name(m, T.mjOBJ_BODY, bid) or ""
-            gname = mujoco.mj_id2name(m, T.mjOBJ_GEOM, g) or ""
-            gid = f"{body}:{gname or ('geom%d' % g)}"
-            visual = bool(m.geom_contype[g] == 0
-                          and m.geom_conaffinity[g] == 0)
-            dyn = bool(m.body_dofnum[bid] > 0)
-            if "stripe" in gname:
-                mat = "safety"
-            elif body.startswith("rack") or body.startswith("bench") \
-                    or body.startswith("fixt") or gname.startswith("line_"):
-                mat = "press" if "fixt" in body or gname.startswith("line_") \
-                    else "rack"
-            elif body.startswith(("A02", "A03")) or gname.startswith("A0"):
-                mat = "agv"
-            elif body.startswith("pl_") or gname.startswith("pl_") \
-                    or gname.startswith("wp_"):
-                mat = "pallet"
-            elif gname == "floor":
-                mat = "floor"
-            else:
-                mat = "steel"
-            quat = [round(float(v), 6) for v in m.geom_quat[g]]
-            geoms.append({
-                "id": gid,
-                "type": mtype[int(m.geom_type[g])],
-                "size": [round(float(v), 6) for v in m.geom_size[g][:3]],
-                "pos": [round(float(v), 6) for v in m.geom_pos[g]],
-                "quat": quat if quat != [1.0, 0.0, 0.0, 0.0] else None,
-                "rgba": [round(float(v), 4) for v in m.geom_rgba[g]],
-                "material": mat,
-                **({"dyn": True} if dyn else {})})
-            if dyn and bid not in dyn_bodies:
-                dyn_bodies[bid] = body
-        dyn_geoms = [{"id": name,
-                      "pos": [round(float(v), 6) for v in d.xpos[b]],
-                      "quat": [round(float(v), 6) for v in d.xquat[b]]}
-                     for b, name in sorted(dyn_bodies.items())]
-        return {"format": "mjcf-mirror-v1", "geoms": geoms,
-                "dyn_geoms": dyn_geoms}
-
-    def pallet_of_wp(self, wp: str) -> str:
-        return self.workpieces[wp]["pallet"]
-
     _MTYPE = {mujoco.mjtGeom.mjGEOM_PLANE: "plane",
               mujoco.mjtGeom.mjGEOM_HFIELD: "hfield",
               mujoco.mjtGeom.mjGEOM_SPHERE: "sphere",
@@ -448,7 +386,7 @@ class LineCell(WarehouseCell):
         几何 (visual 几何 contype=0 已标注), rgba/material_class 供
         PBR 分色。material_class 按命名/用途归类 (工业配色)。"""
         m, d, T = self.model, self.data, mujoco.mjtObj
-        bodies, geoms = [], []
+        bodies, geoms, dyn_bodies = [], [], {}
         for b in range(m.nbody):
             name = mujoco.mj_id2name(m, T.mjOBJ_BODY, b)
             if not name or b == 0:
@@ -483,6 +421,7 @@ class LineCell(WarehouseCell):
                 if "stripe" in gname:
                     mclass = "safety_yellow"
             geoms.append({
+                "id": f"{body}:{name}",
                 "name": gname, "body": body,
                 "type": self._MTYPE.get(int(m.geom_type[g]), "box"),
                 "size": [round(float(v), 6) for v in m.geom_size[g]],
@@ -490,8 +429,19 @@ class LineCell(WarehouseCell):
                 "quat": [round(float(v), 6) for v in m.geom_quat[g]],
                 "rgba": [round(float(v), 4) for v in m.geom_rgba[g]],
                 "visual": visual,
-                "material_class": mclass})
-        return {"format": "mjcf-mirror-v1", "bodies": bodies, "geoms": geoms}
+                "material_class": mclass,
+                "material": "safety" if "stripe" in gname else mclass,
+                **({"dyn": True}
+                   if m.body_dofnum[m.geom_bodyid[g]] > 0 else {})})
+            if m.body_dofnum[m.geom_bodyid[g]] > 0 \
+                    and m.geom_bodyid[g] not in dyn_bodies:
+                dyn_bodies[m.geom_bodyid[g]] = body
+        dyn_geoms = [{"id": name,
+                      "pos": [round(float(v), 6) for v in d.xpos[b]],
+                      "quat": [round(float(v), 6) for v in d.xquat[b]]}
+                     for b, name in sorted(dyn_bodies.items())]
+        return {"format": "mjcf-mirror-v1", "bodies": bodies, "geoms": geoms,
+                "dyn_geoms": dyn_geoms}
 
     def scene_static(self) -> dict:
         """静态几何 (面板 three.js 初始化一次下发; mujoco 世界系)。

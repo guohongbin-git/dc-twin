@@ -20,11 +20,13 @@ class LineLedger:
 
     # ------------------------------------------------------------ 事件
     def record_delivery(self, pallet_id: str, rack_node: str, *,
-                        t_s: float) -> None:
-        """补料到架 (物流事件; 库存 +1)。"""
+                        t_s: float, station_bound: str | None = None) -> None:
+        """补料到架 (物流事件; 库存 +1)。``station_bound``: 架位绑定
+        工位 (物料追溯字段; None = 幽灵/未绑定)。"""
         self._stock[rack_node] = self._stock.get(rack_node, 0) + 1
         self.events.append({"type": "DeliveryRecorded", "ts_s": float(t_s),
-                            "pallet_id": pallet_id, "rack_node": rack_node})
+                            "pallet_id": pallet_id, "rack_node": rack_node,
+                            "station_bound": station_bound})
 
     # ------------------------------------------------------------ 事务
     def prepare_op(self, operation_id: str, *, pallet_id: str,

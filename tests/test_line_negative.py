@@ -56,8 +56,9 @@ def test_wrong_station_feed_flagged_on_delivery(runs):
     wrong = [d for d in rep.deliveries if d.verdict == V_WRONG]
     assert wrong, [(d.pallet_id, d.verdict) for d in rep.deliveries]
     assert any("L-B3" in d.reason for d in wrong)
-    # 交付错架 → 该拍停线 (无工序), 其余工位单一致
-    assert rep.stoppage_ticks == [1]
+    # 交付错架 (拍 1) → 工位架位自下一拍起断粮停线 (拍 2, 3 无工序),
+    # 其余工位单一致
+    assert rep.stoppage_ticks == [2, 3]
     assert all(o.verdict == VERDICT_CONSISTENT for o in rep.ops)
 
 
