@@ -37,6 +37,42 @@ def test_snapshot_pure_read(run):
     assert s1["takt"] == s2["takt"]
 
 
+def test_snapshot_scene_fields(run):
+    s = run.state.snapshot()
+    assert s["carrier"]["heading"] is not None
+    st = s["station"]["ST-PRESS"]
+    assert "slide_q" in st and "plunger_z" in st
+    assert len(s["workpieces"]) >= 1
+    w = s["workpieces"][0]
+    assert set(w) == {"name", "x", "y", "z", "in_fixture"}
+    assert len(s["pallets"]) >= 1
+    assert set(s["pallets"][0]) == {"name", "x", "y"}
+    ss = s["scene_static"]
+    assert ss["format"] == "mjcf-mirror-v1"
+    assert len(ss["geoms"]) > 50
+    assert all({"id", "type", "size", "pos", "material"} <= set(g)
+               for g in ss["geoms"])
+    assert all(g["type"] in ("box", "cylinder", "capsule", "sphere",
+                             "plane") for g in ss["geoms"])
+    assert any(g.get("dyn") for g in ss["geoms"])   # 动态体标记
+    assert any(g["material"] == "safety" for g in ss["geoms"])
+    assert len(ss["dyn_geoms"]) >= 5                # 每帧 movers
+    assert all({"id", "pos", "quat"} <= set(e) for e in ss["dyn_geoms"])
+    # 便利 layout (AABB 投影)
+    assert {"x", "y"} <= set(ss["layout"]["plane"])
+    assert [r["node"] for r in ss["layout"]["racks"]] ==         ["L-B1", "L-B2", "L-B3"]
+    stt = ss["layout"]["station"]
+    assert stt["id"] == "ST-PRESS"
+    assert len(stt["nest_rect"]) == 4 and len(stt["exit_rect"]) == 4
+    assert stt["plunger"]["z_bottom"] < stt["plunger"]["z_rest"]
+    assert len(ss["layout"]["staging"]) >= 1
+
+
+def test_snapshot_pure_read_stable(run):
+    a = run.state.snapshot(); b = run.state.snapshot()
+    assert a == b
+
+
 def test_snapshot_reflects_production(run):
     s = run.state.snapshot()
     assert s["production"]["physical_done"] >= 1

@@ -40,6 +40,7 @@ from . import racks as _racks
 from .evidence import LineFrame
 from .ledger import LineLedger
 from .plc import LinePlc
+from .publisher import LineStatePublisher, resolve_state_path
 from .pull import ReplenishOrder, TaktKanban
 from .registry import rack_bindings, station as _station_spec
 from .scene import (PLANE_Z, PRESS_Q_TARGET, WP_HALF_XYZ, LineCell)
@@ -354,13 +355,25 @@ class _LiveState:
         self._phases = phases
         self._orders = orders
         self._t0 = t0_s
+        self._static = {"format": "mjcf-mirror-v1",
+                        **cell.geom_manifest(),
+                        "layout": cell.scene_static()}
 
     def snapshot(self) -> dict:
         d = self._cell.data
         m = self._cell.model
-        pos = lambda vid: (lambda v: [round(float(v[0]), 4),
-                                      round(float(v[1]), 4)])(
-            self._cell.veh[vid].xy())
+        def pos(vid):
+            return [round(float(x), 4) for x in self._cell.veh[vid].xy()]
+
+        def heading(vid):
+            v = self._cell.veh[vid]
+            return round(float(v.q("yaw") + v.off["yaw"]), 4)
+
+        def xy_of(name):
+            p = (self._cell.pallet_pose(name)[0] if name.startswith("pl")
+                 else self._cell.wp_pose(name)[0])
+            return [round(float(p[0]), 4), round(float(p[1]), 4),
+                    round(float(p[2]), 4)]
         stock = {n: {"L0": len(v), "L1": 0} for n, v in self._stock.items()}
         k = len(self._truth["cycles"]) + len(self._truth["stoppage_ticks"])
         next_tick = (self._t0 + (k + 1) * self._takt) if self._orders else None
@@ -375,6 +388,16 @@ class _LiveState:
         mismatches = [c["op_id"] for c in self._truth["cycles"]
                       if not c["force_ok"]]
         last_ev = self._events[-1] if self._events else None
+        h = self._cell.presses["ST-PRESS"]
+        wps = [{"name": w, **dict(zip(("x", "y", "z"), xy_of(w))),
+                "in_fixture": bool(
+                    self._cell.geos["ST-PRESS"].nest_rect()[0]
+                    <= xy_of(w)[0] <= self._cell.geos["ST-PRESS"].nest_rect()[1]
+                    and self._cell.geos["ST-PRESS"].nest_rect()[2]
+                    <= xy_of(w)[1] <= self._cell.geos["ST-PRESS"].nest_rect()[3])}
+               for w in self._cell.workpieces]
+        plts = [{"name": p, **dict(zip(("x", "y"), xy_of(p)[:2]))}
+                for p in self._cell.pallets]
         return {
             "sim_t": round(float(d.time), 4),
             "takt": {"takt_s": self._takt, "k": k,
@@ -384,11 +407,18 @@ class _LiveState:
             "station": {"ST-PRESS": {
                 "state": self._phases.get("station", "idle"),
                 "part": part, "plc_word": word,
+                "slide_q": round(h.q_press(self._cell), 4),
+                "plunger_z": round(h.head_bottom_z(self._cell), 4),
                 "last_event": last_ev}},
             "carrier": {"vid": CARRIER, "pos": pos(CARRIER),
+                        "heading": heading(CARRIER),
                         "task": self._phases.get("carrier", "idle")},
             "clearer": {"vid": CLEARER, "pos": pos(CLEARER),
+                        "heading": heading(CLEARER),
                         "task": self._phases.get("clearer", "idle")},
+            "workpieces": wps,
+            "pallets": plts,
+            "scene_static": self._static,
             "evidence_recent": list(self._events[-20:]),
             "production": {"physical_done": physical,
                            "ledger_committed": committed,
@@ -432,7 +462,12 @@ class LineRun:
 # ---------------------------------------------------------------- 主幕
 def run_line(*, faults=(), out_dir=None, horizon_s: float = 1800.0,
              takt_s: float | None = None, t0_s: float = 12.0,
-             line_pallets: int = 32, run_id: str | None = None) -> LineRun:
+             line_pallets: int = 32, run_id: str | None = None,
+             state_path=None, state_interval_s: float = 5.0) -> LineRun:
+    """``state_path``: 状态发布 JSON 路径 (显式参数 → 环境变量
+    DC_TWIN_LINE_STATE_PATH → publisher.DEFAULT_LINE_STATE_PATH;
+    False 关闭发布, 测试隔离用); ``state_interval_s`` 发布节拍
+    (仿真秒)。"""
     faults = frozenset(faults)
     unknown = faults - set(FAULTS)
     if unknown:
@@ -501,6 +536,12 @@ def run_line(*, faults=(), out_dir=None, horizon_s: float = 1800.0,
     live = _LiveState(cell, takt, stock, plc, ledger, truth, events_out,
                       phases, orders, t0_s)
     _LATEST.append(live)
+    pub = None                                   # 面板状态发布器 (§15)
+    sp = resolve_state_path(state_path)
+    if sp is not None:
+        pub = LineStatePublisher(sp, live, run_id=run_id,
+                                 interval_s=state_interval_s)
+        pub.publish()                            # 开机即有在线快照
 
     def _eid() -> str:
         seq["n"] += 1
@@ -665,6 +706,8 @@ def run_line(*, faults=(), out_dir=None, horizon_s: float = 1800.0,
                 "clearer", "idle")})
             chans.add(items, delay=CLEAR_DELAY_S)
         chans.run(t0=t_tick)
+        if pub is not None:
+            pub.maybe_publish(cell.data.time)
 
         # ---- 无程序伪造 (forge_op): 账面 + 证据全伪造
         if forge_np:
@@ -725,6 +768,8 @@ def run_line(*, faults=(), out_dir=None, horizon_s: float = 1800.0,
     (out_dir / "evidence_events.json").write_text(
         json.dumps(events_out, ensure_ascii=False, indent=1),
         encoding="utf-8")
+    if pub is not None:
+        pub.publish()                            # 收官终态 (面板定格)
     return LineRun(run_id=run_id, out_dir=out_dir,
                    audit={"max_pen_m": truth["audit"]["max_pen_m"],
                           "cycles": len(truth["cycles"]),

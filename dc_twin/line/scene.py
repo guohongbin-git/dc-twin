@@ -122,6 +122,17 @@ class StationGeometry:
         A(f'    <geom name="fixt_{sid}_beam" type="box" '
           f'pos="{x:.3f} {ny:.3f} 0.300" size="0.170 0.010 0.020" '
           f'rgba="0.30 0.32 0.36 1"/>')
+        # 视觉层 (contype=0): 底座面板 + 控制柜 + 立柱安全黄黑饰带
+        A(f'    <geom name="fixt_{sid}_basepanel" type="box" '
+          f'pos="{x:.3f} {ny - 0.10:.3f} 0.020" size="0.150 0.060 0.020" '
+          f'rgba="0.45 0.48 0.52 1" contype="0" conaffinity="0"/>')
+        A(f'    <geom name="fixt_{sid}_cabinet" type="box" '
+          f'pos="{x + 0.30:.3f} {ny:.3f} 0.100" size="0.050 0.060 0.100" '
+          f'rgba="0.36 0.47 0.58 1" contype="0" conaffinity="0"/>')
+        for zz in (0.10, 0.22):
+            A(f'    <geom name="fixt_{sid}_stripe_{zz:.2f}" type="box" '
+              f'pos="{x:.3f} {ny:.3f} {zz:.3f}" size="0.170 0.012 0.010" '
+              f'rgba="0.95 0.79 0.04 1" contype="0" conaffinity="0"/>')
         # ---- 冲压头 (slide actuator; ctrlrange 显式) ----
         A(f'    <body name="line_press_{sid}" pos="{x:.3f} {ny:.3f} '
           f'{PLANE_Z + 0.065:.4f}">')
@@ -357,6 +368,179 @@ class LineCell(WarehouseCell):
 
     def pallet_of_wp(self, wp: str) -> str:
         return self.workpieces[wp]["pallet"]
+
+    def geom_manifest(self) -> dict:
+        """MJCF→three.js 几何镜像 (PanelTab schema v1; mujoco 约定
+        half-size, 世界系 pos/quat 对静态体 = local; 动态体 dyn=true,
+        每帧位姿走 dyn_geoms 按体驱动)。非原生 type (mesh/hfield) 跳过。"""
+        m, d, T = self.model, self.data, mujoco.mjtObj
+        mtype = {int(mujoco.mjtGeom.mjGEOM_PLANE): "plane",
+                 int(mujoco.mjtGeom.mjGEOM_SPHERE): "sphere",
+                 int(mujoco.mjtGeom.mjGEOM_CAPSULE): "capsule",
+                 int(mujoco.mjtGeom.mjGEOM_CYLINDER): "cylinder",
+                 int(mujoco.mjtGeom.mjGEOM_BOX): "box"}
+        skip = {int(mujoco.mjtGeom.mjGEOM_MESH),
+                int(mujoco.mjtGeom.mjGEOM_HFIELD),
+                int(mujoco.mjtGeom.mjGEOM_ELLIPSOID),
+                int(mujoco.mjtGeom.mjGEOM_SDF)}
+        geoms, dyn_bodies = [], {}
+        for g in range(m.ngeom):
+            if int(m.geom_type[g]) in skip:
+                continue
+            bid = int(m.geom_bodyid[g])
+            body = mujoco.mj_id2name(m, T.mjOBJ_BODY, bid) or ""
+            gname = mujoco.mj_id2name(m, T.mjOBJ_GEOM, g) or ""
+            gid = f"{body}:{gname or ('geom%d' % g)}"
+            visual = bool(m.geom_contype[g] == 0
+                          and m.geom_conaffinity[g] == 0)
+            dyn = bool(m.body_dofnum[bid] > 0)
+            if "stripe" in gname:
+                mat = "safety"
+            elif body.startswith("rack") or body.startswith("bench") \
+                    or body.startswith("fixt") or gname.startswith("line_"):
+                mat = "press" if "fixt" in body or gname.startswith("line_") \
+                    else "rack"
+            elif body.startswith(("A02", "A03")) or gname.startswith("A0"):
+                mat = "agv"
+            elif body.startswith("pl_") or gname.startswith("pl_") \
+                    or gname.startswith("wp_"):
+                mat = "pallet"
+            elif gname == "floor":
+                mat = "floor"
+            else:
+                mat = "steel"
+            quat = [round(float(v), 6) for v in m.geom_quat[g]]
+            geoms.append({
+                "id": gid,
+                "type": mtype[int(m.geom_type[g])],
+                "size": [round(float(v), 6) for v in m.geom_size[g][:3]],
+                "pos": [round(float(v), 6) for v in m.geom_pos[g]],
+                "quat": quat if quat != [1.0, 0.0, 0.0, 0.0] else None,
+                "rgba": [round(float(v), 4) for v in m.geom_rgba[g]],
+                "material": mat,
+                **({"dyn": True} if dyn else {})})
+            if dyn and bid not in dyn_bodies:
+                dyn_bodies[bid] = body
+        dyn_geoms = [{"id": name,
+                      "pos": [round(float(v), 6) for v in d.xpos[b]],
+                      "quat": [round(float(v), 6) for v in d.xquat[b]]}
+                     for b, name in sorted(dyn_bodies.items())]
+        return {"format": "mjcf-mirror-v1", "geoms": geoms,
+                "dyn_geoms": dyn_geoms}
+
+    def pallet_of_wp(self, wp: str) -> str:
+        return self.workpieces[wp]["pallet"]
+
+    _MTYPE = {mujoco.mjtGeom.mjGEOM_PLANE: "plane",
+              mujoco.mjtGeom.mjGEOM_HFIELD: "hfield",
+              mujoco.mjtGeom.mjGEOM_SPHERE: "sphere",
+              mujoco.mjtGeom.mjGEOM_CAPSULE: "capsule",
+              mujoco.mjtGeom.mjGEOM_ELLIPSOID: "ellipsoid",
+              mujoco.mjtGeom.mjGEOM_CYLINDER: "cylinder",
+              mujoco.mjtGeom.mjGEOM_BOX: "box",
+              mujoco.mjtGeom.mjGEOM_MESH: "mesh"}
+
+    def geom_manifest(self) -> dict:
+        """MJCF→three.js 几何镜像 (全 geom 清单, 维度取 MJCF 真值)。
+
+        {format, bodies, geoms}: bodies = 位姿节点 (面板静态件一次
+        下发; 动态件每帧按 name 查 dynamic_poses 更新); geoms = 视觉
+        几何 (visual 几何 contype=0 已标注), rgba/material_class 供
+        PBR 分色。material_class 按命名/用途归类 (工业配色)。"""
+        m, d, T = self.model, self.data, mujoco.mjtObj
+        bodies, geoms = [], []
+        for b in range(m.nbody):
+            name = mujoco.mj_id2name(m, T.mjOBJ_BODY, b)
+            if not name or b == 0:
+                continue
+            bodies.append({
+                "name": name,
+                "parent": mujoco.mj_id2name(m, T.mjOBJ_BODY,
+                                            m.body_parentid[b]) or "world",
+                "pos": [round(float(v), 6) for v in d.xpos[b]],
+                "quat": [round(float(v), 6) for v in d.xquat[b]],
+                "dynamic": bool(m.body_dofnum[b] > 0
+                                or m.body_weldid[b] != b)})
+        mat_of = {"rack": "steel_frame", "bench": "steel_frame",
+                  "fixt": "machine_frame", "line_press": "steel",
+                  "line_push": "safety_yellow", "stg": "steel_frame",
+                  "out": "steel_frame", "A02": "agv_blue",
+                  "A03": "agv_blue", "pl_": "pallet_wood",
+                  "wp_": "part_blank", "floor": "floor"}
+        for g in range(m.ngeom):
+            name = mujoco.mj_id2name(m, T.mjOBJ_GEOM, g)
+            if not name:
+                continue
+            gname = name
+            body = mujoco.mj_id2name(m, T.mjOBJ_BODY, m.geom_bodyid[g]) or ""
+            visual = bool(m.geom_contype[g] == 0 and m.geom_conaffinity[g] == 0)
+            mclass = "generic"
+            for k, v in mat_of.items():
+                if gname.startswith(k) or body.startswith(k):
+                    mclass = v
+                    break
+            else:
+                if "stripe" in gname:
+                    mclass = "safety_yellow"
+            geoms.append({
+                "name": gname, "body": body,
+                "type": self._MTYPE.get(int(m.geom_type[g]), "box"),
+                "size": [round(float(v), 6) for v in m.geom_size[g]],
+                "pos": [round(float(v), 6) for v in m.geom_pos[g]],
+                "quat": [round(float(v), 6) for v in m.geom_quat[g]],
+                "rgba": [round(float(v), 4) for v in m.geom_rgba[g]],
+                "visual": visual,
+                "material_class": mclass})
+        return {"format": "mjcf-mirror-v1", "bodies": bodies, "geoms": geoms}
+
+    def scene_static(self) -> dict:
+        """静态几何 (面板 three.js 初始化一次下发; mujoco 世界系)。
+
+        {plane, racks, station, staging, marks} —— 字段契约见
+        dc_twin/line/runtime.py _LiveState.snapshot docstring。"""
+        xs, ys = [], []
+        rack_list = []
+        for node, g in self.racks.items():
+            rack_list.append({"node": node, "x": round(g.x, 4),
+                              "y": round(g.y, 4), "w": 0.42, "d": 0.24,
+                              "levels": [_racks.L0_TOP_Z, _racks.L1_TOP_Z]})
+            xs += [g.x - 0.21, g.x + 0.21]
+            ys += [g.y - 0.12, g.y + 0.12]
+        for sid, geo in self.geos.items():
+            xs += [geo.x - 0.18, geo.x + 0.18]
+            ys += [geo.nest_y - 0.08, geo.nest_y + 0.08]
+            nr = list(geo.nest_rect())
+            press_sid = geo.spec.station_id
+        staging = [{"x": round(self.staging_slot(k)[0], 4),
+                    "y": round(self.staging_slot(k)[1], 4)}
+                   for k in range(self.n_staging)]
+        for x_s, y_s in [(s["x"], s["y"]) for s in staging]:
+            xs += [x_s - 0.06, x_s + 0.06]
+            ys += [y_s - 0.06, y_s + 0.06]
+        n_out = max(1, self._line_pallets - 2)
+        for j in range(n_out):
+            x_o, y_o = self.out_slot(j)
+            xs += [x_o - 0.07, x_o + 0.07]
+            ys += [y_o - 0.06, y_o + 0.06]
+        h = self.presses[press_sid]
+        return {
+            "plane": {"x": [round(min(xs), 4), round(max(xs), 4)],
+                      "y": [round(min(ys), 4), round(max(ys), 4)]},
+            "racks": rack_list,
+            "station": {"id": press_sid,
+                        "nest_rect": [round(v, 4) for v in nr],
+                        "exit_rect": [round(v, 4) for v in nr],
+                        "plunger": {
+                            "x": round(geo.x, 4), "y": round(geo.nest_y, 4),
+                            "w": 0.060, "d": 0.052,
+                            "z_rest": round(PLANE_Z + 0.055, 4),
+                            "z_bottom": round(PLANE_Z + 0.055
+                                              - 0.055 + 0.002, 4)},
+                        "backstop": {"x": round(geo.x, 4),
+                                     "y": round(geo.nest_y + 0.035, 4),
+                                     "w": 0.11, "d": 0.01}},
+            "staging": staging,
+            "marks": []}
 
     # ------------------------------------------------------------ MJCF
     def _xml(self, dt: float) -> str:
