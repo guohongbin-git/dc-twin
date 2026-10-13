@@ -3,7 +3,10 @@ name = "dc-twin"
 version = "0.1.0"
 description = "Evidence-grounded DC digital twin (open-source Warehouse-Blueprint-style scenario on agv-warehouse-core)"
 requires-python = ">=3.11"
-dependencies = ["numpy"]
+dependencies = ["numpy", "agv-warehouse-core>=2.4,<2.5"]
+# agv-warehouse-core 未发布 PyPI: 工作区经 sys.path 注入 (tests/conftest.py)
+# 或 `pip install -e ~/1-Projects/desktop-agv-demo`; 上界 <2.5 即蓝图 §6
+# 「dc-twin 锁 core minor」。
 
 [project.optional-dependencies]
 sim = ["mujoco>=3.0", "ortools>=9.8"]
