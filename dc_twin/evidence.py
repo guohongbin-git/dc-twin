@@ -11,7 +11,7 @@ truth_state / durable_commit_time) **不进运行时证据** —— 只存在于
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from services.world import evidence as _ev
 
