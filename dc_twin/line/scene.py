@@ -26,27 +26,31 @@ from .registry import PressSpec, rack_bindings, station as _station_spec
 
 #: 工位平面 (相对走廊线的托盘止点; 背止挡面 = 止点 +0.030)
 NEST_STOP_DY = 0.225
-EXIT_STOP_DY = 0.425
-#: 夹具/出口承托面 (全链同 stand_top_z)
+#: 夹具承托面 (AGV 顶升焊携托制式平面)
 PLANE_Z = _racks.L0_TOP_Z
-#: 冲压头: q=0 回缩位头底 0.170 (工件顶 ~0.141 上方净空 29mm);
-#: 下压行程 q ∈ [-0.042, 0], 目标 q* = -0.035 → 头底 0.135,
-#: 成形压入 ~6mm (位置伺服力 = kp×|Δq|, 力剖面采样源)
-PRESS_Q_RANGE = 0.042
-PRESS_Q_TARGET = -0.035
-#: 推料滑台: q=0 刀前 2.060 (架面托盘南脸 2.070 前 10mm);
-#: 进料行程 0.235 (托盘止于 nest), 出料行程 0.435 (止于出口)
-PUSH_Q_RANGE = 0.46
-PUSH_Q_FEED = 0.235
-PUSH_Q_EXIT = 0.435
-#: 工件 (瓶坯/小箱体) 半尺寸与质量
-WP_HALF_XYZ = (0.024, 0.018, 0.014)
+#: 冲压头: 头底 q=0 = PLANE_Z+0.055 (坯顶 PLANE_Z+0.017 上方 38mm);
+#: 下压行程 q ∈ [-PRESS_Q_RANGE, 0], 目标 q* 使头底 = 坯顶-2mm
+#: (刚性坯压入 2mm, 力 = kp×|Δq|; 不可全压穿 —— 全压将坯顶入托盘
+#: 卡死机构, 实测 pen 62mm 事故即此)
+PRESS_Q_RANGE = 0.055
+PRESS_Q_TARGET = -0.043
+#: 工件 = 冲压板坯 (半尺寸; §14 叙事: 压盖/冲压类工位坯料)
+WP_HALF_XYZ = (0.024, 0.018, 0.003)
 WP_MASS_KG = 0.05
-#: 暂存/产出门架
-STAGING_XS = (4.15, 4.70)
-SLOTS_PER_BENCH = 30
-OUT_X = 2.50
-OUT_Y0 = 1.90
+#: 产线薄顶托盘顶面 (core 托盘顶 0.020 → 0.010: 载托底 0.122 与
+#: 在架坯顶 0.111 净空 11mm, 供料环不跨压在架料)
+LPAL_TOP_DZ = 0.010
+#: 暂存/产出门架。暂存列 x=3.30/4.15 (L-B2/L-B3 东侧, 供料环短);
+#: 槽位距 0.30, 取料深先南后北 —— 携托凸台底 0.092 < 在架坯顶
+#: 0.111, 不可跨未取位 (回程只穿已取空的南侧槽位); 北端 y=2.10 行
+#: 弃用 (避 L-B* 门腿 y=2.00/2.20 行)。产出位回 L-B1 车道。
+STAGING_X = 2.50              # 暂存列 = 供料摆线列 (A02 纯 Y 摆)
+STAGING_PITCH = 0.30
+STAGING_Y_TOP = 1.80          # 首槽 (北先浅取; 北向直上 nest 无跨位)
+SLOTS_PER_BENCH = 10          # 单列容量 (y 1.80 → −0.90, AGV 轴程内)
+OUT_X = 2.43                  # 产出列首槽 (A03 北Lane y=3.02 东延取位)
+OUT_PITCH = 0.12
+OUT_Y = 3.02                  # 产出行 (A03 携托偏置 −0.15 落位行)
 
 
 def run_segments(cell, segs: list[tuple]) -> None:
@@ -84,52 +88,41 @@ class StationGeometry:
     def nest_y(self) -> float:
         return self.cy + NEST_STOP_DY
 
-    @property
-    def exit_y(self) -> float:
-        return self.cy + EXIT_STOP_DY
-
     def nest_rect(self) -> tuple[float, float, float, float]:
         """nest 托盘止位矩形 (x0,x1,y0,y1) —— 评分器 custody 核对。"""
         return (self.x - 0.048, self.x + 0.048,
                 self.nest_y - 0.034, self.nest_y + 0.034)
 
     def exit_rect(self) -> tuple[float, float, float, float]:
-        return (self.x - 0.048, self.x + 0.048,
-                self.exit_y - 0.034, self.exit_y + 0.034)
+        """成品取出口 = nest 本位 (压制完成后 A03 原位取托)。"""
+        return self.nest_rect()
 
     # ------------------------------------------------------------ MJCF
     def xml(self) -> str:
         x, sid = self.x, self.spec.station_id
-        ny, ey, cy = self.nest_y, self.exit_y, self.cy
+        ny, cy = self.nest_y, self.cy
         g = [f'  <body name="line_fixt_{sid}" pos="0 0 0">']
         A = g.append
-        for sx in (-0.033, 0.033):                      # nest/出口条带
-            for tag, y_b in (("nest", ny), ("exit", ey)):
-                for sy in (y_b - 0.047, y_b + 0.047):
-                    A(f'    <geom name="fixt_{sid}_{tag}_{sx:.3f}_{sy:.3f}" '
-                      f'type="box" pos="{x + sx:.3f} {sy:.3f} {PLANE_Z - 0.002:.4f}" '
-                      f'size="0.011 0.023 0.002" rgba="0.32 0.46 0.52 1"/>')
-        for sx in (-0.033, 0.033):                      # 过渡导轨 架面→nest→出口
-            A(f'    <geom name="fixt_{sid}_rail_{sx:.3f}" type="box" '
-              f'pos="{x + sx:.3f} 2.290 {PLANE_Z - 0.0025:.4f}" '
-              f'size="0.004 0.270 0.0025" rgba="0.28 0.30 0.34 1"/>')
-        for tag, y_stop in (("nest", ny + 0.035), ("exit", ey + 0.035)):
-            A(f'    <geom name="fixt_{sid}_stop_{tag}" type="box" '
-              f'pos="{x:.3f} {y_stop:.3f} {PLANE_Z + 0.0225:.4f}" '
-              f'size="0.055 0.005 0.0225" rgba="0.85 0.30 0.20 1"/>')
-        # Portal: nestp=冲压门架 / exitp=出口挡 / sp=推料滑台支座
-        for tag, py, hz, (b0, b1) in (("nestp", ny, 0.17, (0.34, 0.38)),
-                                      ("exitp", ey, 0.07, (0.14, 0.16)),
-                                      ("sp", cy - 0.10, 0.15, (0.30, 0.324))):
-            for sx in (-0.16, 0.16):
-                A(f'    <geom name="fixt_{sid}_leg_{tag}_{sx:.2f}" type="box" '
-                  f'pos="{x + sx:.2f} {py:.3f} {hz:.3f}" '
-                  f'size="0.008 0.008 {hz:.3f}" rgba="0.22 0.24 0.28 1"/>')
-            A(f'    <geom name="fixt_{sid}_beam_{tag}" type="box" '
-              f'pos="{x:.3f} {py:.3f} {(b0 + b1) / 2:.3f}" '
-              f'size="0.170 0.010 {(b1 - b0) / 2:.3f}" rgba="0.30 0.32 0.36 1"/>')
+        for sx in (-0.033, 0.033):                      # nest 条带 (托盘座位)
+            for sy in (ny - 0.047, ny + 0.047):
+                A(f'    <geom name="fixt_{sid}_nest_{sx:.3f}_{sy:.3f}" '
+                  f'type="box" pos="{x + sx:.3f} {sy:.3f} {PLANE_Z - 0.002:.4f}" '
+                  f'size="0.011 0.023 0.002" rgba="0.32 0.46 0.52 1"/>')
+        # nest 背止挡 (面 = 止点 +0.030, 托板底面接触定位)
+        A(f'    <geom name="fixt_{sid}_stop_nest" type="box" '
+          f'pos="{x:.3f} {ny + 0.035:.3f} {PLANE_Z - 0.0015:.4f}" '
+          f'size="0.055 0.005 0.0025" rgba="0.85 0.30 0.20 1"/>')
+        # 冲压门架 (portal 立柱距 A02 摆线 x=2.50 恒 0.16)
+        for sx in (-0.16, 0.16):
+            A(f'    <geom name="fixt_{sid}_leg_{sx:.2f}" type="box" '
+              f'pos="{x + sx:.2f} {ny:.3f} 0.140" size="0.008 0.008 0.140" '
+              f'rgba="0.22 0.24 0.28 1"/>')
+        A(f'    <geom name="fixt_{sid}_beam" type="box" '
+          f'pos="{x:.3f} {ny:.3f} 0.300" size="0.170 0.010 0.020" '
+          f'rgba="0.30 0.32 0.36 1"/>')
         # ---- 冲压头 (slide actuator; ctrlrange 显式) ----
-        A(f'    <body name="line_press_{sid}" pos="{x:.3f} {ny:.3f} 0.180">')
+        A(f'    <body name="line_press_{sid}" pos="{x:.3f} {ny:.3f} '
+          f'{PLANE_Z + 0.065:.4f}">')
         A(f'      <joint name="line_{sid}_press_j" type="slide" axis="0 0 1" '
           f'range="{-PRESS_Q_RANGE} 0" damping="30"/>')
         A(f'      <geom name="line_{sid}_head" type="box" pos="0 0 0" '
@@ -139,21 +132,6 @@ class StationGeometry:
           f'size="0.006 0.075" mass="0" rgba="0.45 0.46 0.50 1" '
           f'contype="0" conaffinity="0"/>')
         A("    </body>")
-        # ---- 推料滑台 (slide actuator) ----
-        A(f'    <body name="line_push_{sid}" pos="{x:.3f} {cy - 0.045:.3f} 0">')
-        A(f'      <joint name="line_{sid}_push_j" type="slide" axis="0 1 0" '
-          f'range="0 {PUSH_Q_RANGE}" damping="40"/>')
-        A(f'      <geom name="line_{sid}_blade" type="box" pos="0 0 0.1125" '
-          f'size="0.046 0.005 0.016" mass="0.20" '
-          f'friction="0.6 0.005 0.0001" rgba="0.90 0.75 0.10 1"/>')
-        for sx in (-0.06, 0.06):
-            A(f'      <geom name="line_{sid}_strut_{sx:.2f}" type="box" '
-              f'pos="{sx:.2f} 0 0.225" size="0.008 0.006 0.097" mass="0" '
-              f'rgba="0.45 0.46 0.50 1" contype="0" conaffinity="0"/>')
-        A(f'      <geom name="line_{sid}_arm" type="box" pos="0 -0.03 0.315" '
-          f'size="0.070 0.035 0.006" mass="0" rgba="0.45 0.46 0.50 1" '
-          f'contype="0" conaffinity="0"/>')
-        A("    </body>")
         A("  </body>")
         return "\n".join(g)
 
@@ -161,30 +139,102 @@ class StationGeometry:
         sid = self.spec.station_id
         return (
             f'    <position name="line_{sid}_press" joint="line_{sid}_press_j" '
-            f'kp="4000" forcerange="-80 80" ctrlrange="{-PRESS_Q_RANGE} 0"/>\n'
-            f'    <position name="line_{sid}_push" joint="line_{sid}_push_j" '
-            f'kp="3000" forcerange="-60 60" ctrlrange="0 {PUSH_Q_RANGE}"/>')
+            f'kp="4000" forcerange="-80 80" '
+            f'ctrlrange="{-PRESS_Q_RANGE} 0"/>')
 
 
-def _bench_xml(tag: str, x: float, y_lo: float, y_hi: float) -> str:
-    """暂存/产出门架: 导轨 (顶 0.095) + 对角立柱 (AGV 包络外)。"""
+
+
+#: AGV 干道走廊 (立柱净空带: 带内不设立柱, 静态门架视觉链可断)
+BENCH_CORRIDOR_YS = (1.60, 2.10)
+
+
+def _bench_xml_staging(tag: str, x: float, slot_ys: list[float]) -> str:
+    """暂存列: 逐槽支承对 (块顶 0.095, 内档 0.034>销盘缘 0.026)。
+    不设长轨 —— 携托凸台/销盘沿槽行自穿支承对间隙。"""
+    parts = []
+    for i, sy in enumerate(slot_ys):
+        for sx in (-0.0475, 0.0475):
+            parts.append(
+                f'    <geom name="bench_{tag}_bearer_{i}_{sx:.2f}" '
+                f'type="box" pos="{x + sx:.2f} {sy:.3f} 0.0885" '
+                f'size="0.015 0.024 0.0065" rgba="0.28 0.30 0.34 1"/>')
+    return f'  <body name="bench_{tag}" pos="0 0 0">\n' + \
+        "\n".join(parts) + "\n  </body>"
+
+
+def _bench_xml_x(tag: str, y: float, x_lo: float, x_hi: float,
+                 corridor_ys: tuple[float, ...] = (),
+                 rail_dy: float = 0.033) -> str:
+    """横向门架 (导轨沿 x; 产出行)。立柱仅落在携托走廊带外。"""
+    xmid, xhalf = (x_lo + x_hi) / 2, (x_hi - x_lo) / 2
+    xs = [x_lo + 0.20]                # 首腿让开 A02 南下列 x=2.10
+    while xs[-1] + 0.5 < x_hi - 1e-9:
+        xs.append(xs[-1] + 0.5)
+    if xs[-1] < x_hi - 1e-9:
+        xs.append(x_hi)
+    rails = "\n".join(
+        f'    <geom name="bench_{tag}_rail_{sy:.2f}" type="box" '
+        f'pos="{xmid:.3f} {y + sy:.3f} {PLANE_Z - 0.0025:.4f}" '
+        f'size="{xhalf:.4f} 0.004 0.0025" rgba="0.28 0.30 0.34 1"/>'
+        for sy in (-rail_dy, rail_dy))
+    legs = []
+    ly = y - 0.19 if all(abs((y - 0.19) - cy) >= 0.18
+                         for cy in corridor_ys) else None
+    ly2 = y + 0.19 if all(abs((y + 0.19) - cy) >= 0.18
+                          for cy in corridor_ys) else None
+    for ly in (ly, ly2):
+        if ly is None:
+            continue
+        for lx in xs:
+            legs.append(
+                f'    <geom name="bench_{tag}_leg_{lx:.2f}_{ly:.2f}" '
+                f'type="box" pos="{lx:.3f} {ly:.3f} 0.045" '
+                f'size="0.006 0.006 0.045" rgba="0.22 0.24 0.28 1"/>')
+    return (f'  <body name="bench_{tag}" pos="0 0 0">\n{rails}\n'
+            + "\n".join(legs) + "\n  </body>")
+
+
+def _bench_xml(tag: str, x: float, y_lo: float, y_hi: float,
+               corridor_ys: tuple[float, ...] = ()) -> str:
+    """暂存/产出门架: 导轨 (顶 0.095) + 对角立柱 (AGV 包络外; 携托
+    凸台低至 0.092 —— 携托走廊带内不设立柱)。"""
     ymid, yhalf = (y_lo + y_hi) / 2, (y_hi - y_lo) / 2
     ys = [y_lo]
     while ys[-1] + 0.5 < y_hi - 1e-9:
         ys.append(ys[-1] + 0.5)
     if ys[-1] < y_hi - 1e-9:
         ys.append(y_hi)
+    ys = [y for y in ys if all(abs(y - cy) >= 0.18
+                               for cy in (*BENCH_CORRIDOR_YS,
+                                           *corridor_ys))]
     rails = "\n".join(
         f'    <geom name="bench_{tag}_rail_{sx:.2f}" type="box" '
         f'pos="{x + sx:.2f} {ymid:.3f} {PLANE_Z - 0.0025:.4f}" '
         f'size="0.004 {yhalf:.4f} 0.0025" rgba="0.28 0.30 0.34 1"/>'
-        for sx in (-0.033, 0.033))
+        for sx in (-0.037, 0.037))
     legs = "\n".join(
         f'    <geom name="bench_{tag}_leg_{sx:.2f}_{ly:.2f}" type="box" '
         f'pos="{x + sx:.2f} {ly:.3f} 0.045" size="0.006 0.006 0.045" '
         f'rgba="0.22 0.24 0.28 1"/>'
         for ly in ys for sx in (-0.19, 0.19))
     return f'  <body name="bench_{tag}" pos="0 0 0">\n{rails}\n{legs}\n  </body>'
+
+
+def _pallet_slim_xml(name: str, x: float, y: float, z: float) -> str:
+    """产线薄顶托盘: 底板/凸台同 core 链, 顶板 0.010 (core 0.020)。"""
+    q = "1.0 0 0 0"
+    return f"""
+    <body name="{name}" pos="{x:.6f} {y:.6f} {z + 0.001:.6f}" quat="{q}">
+      <freejoint name="free_{name}"/>
+      <geom name="{name}_bottom_l" type="box" pos="0 -0.027 0.002" size="0.055 0.003 0.002" mass="0.008" rgba="0.55 0.40 0.22 1"/>
+      <geom name="{name}_bottom_r" type="box" pos="0 0.027 0.002" size="0.055 0.003 0.002" mass="0.008" rgba="0.55 0.40 0.22 1"/>
+      <geom name="{name}_bottom_c" type="box" pos="0 0 0.002" size="0.055 0.006 0.002" mass="0.012" rgba="0.55 0.40 0.22 1"/>
+      <geom name="{name}_top_l" type="box" pos="0 -0.027 0.008" size="0.055 0.004 0.002" mass="0.008" friction="1.4 0.005 0.0001" rgba="0.72 0.55 0.32 1"/>
+      <geom name="{name}_top_r" type="box" pos="0 0.027 0.008" size="0.055 0.004 0.002" mass="0.008" friction="1.4 0.005 0.0001" rgba="0.72 0.55 0.32 1"/>
+      <geom name="{name}_top_c" type="box" pos="0 0 0.008" size="0.055 0.020 0.002" mass="0.010" friction="1.4 0.005 0.0001" rgba="0.72 0.55 0.32 1"/>
+      <geom name="{name}_boss" type="box" pos="0 0 -0.015" size="0.020 0.020 0.015" mass="0.004" rgba="0.45 0.32 0.16 1"/>
+    </body>"""
 
 
 def _workpiece_xml(name: str, x: float, y: float, z: float) -> str:
@@ -217,9 +267,7 @@ class PressHandle:
     spec: PressSpec
     geo: StationGeometry
     press_aid: int
-    push_aid: int
     press_qadr: int
-    push_qadr: int
     head_bid: int
     head_gids: frozenset
     nest_strip_gids: frozenset
@@ -233,15 +281,15 @@ class PressHandle:
     def q_press(self, cell) -> float:
         return float(cell.data.qpos[self.press_qadr])
 
-    def q_push(self, cell) -> float:
-        return float(cell.data.qpos[self.push_qadr])
-
     def head_bottom_z(self, cell) -> float:
         return float(cell.data.xpos[self.head_bid][2]) - 0.010
 
+    IN_POSITION_TOL = 6e-3      # 成形压紧时接触失步 ~4-5mm 属到位
+
     def in_position(self, cell) -> bool:
-        """设备字判据: 冲压头到位 (位置环; 不感知接触/负载, 同 B4)。"""
-        return abs(self.q_press(cell) - PRESS_Q_TARGET) < 5e-4
+        """设备字判据: 冲压头进入成形带 (位置环; 不感知力值, 同 B4
+        —— 设备字不读接触力, 容差覆盖压紧失步)。"""
+        return abs(self.q_press(cell) - PRESS_Q_TARGET) < self.IN_POSITION_TOL
 
 
 class LineCell(WarehouseCell):
@@ -254,6 +302,10 @@ class LineCell(WarehouseCell):
                  workpieces: bool = True, **kw):
         if line_pallets < len(preload_racks):
             raise ValueError("托盘数少于预载数")
+        if line_pallets > SLOTS_PER_BENCH + len(preload_racks):
+            raise ValueError(
+                f"暂存容量不足 (单列 {SLOTS_PER_BENCH} 位:"
+                f" 上限 {SLOTS_PER_BENCH + len(preload_racks)})")
         self._line_racks = tuple(line_racks)
         self._station_ids = tuple(stations)
         self._line_pallets = int(line_pallets)
@@ -281,13 +333,17 @@ class LineCell(WarehouseCell):
         return self._line_pallets - len(self._preload_racks)
 
     def staging_slot(self, k: int) -> tuple[float, float]:
+        """暂存位 (A02 摆线列 x=STAGING_X; 北先浅取, 拾托后北向直上
+        nest, 无跨位交叠)。"""
         if k >= self.n_staging:
             raise KeyError(f"暂存位不足: {k} ≥ {self.n_staging}")
-        return (STAGING_XS[k // SLOTS_PER_BENCH],
-                _racks.LINE_CORRIDOR_Y + 0.10 * (k % SLOTS_PER_BENCH))
+        return (STAGING_X,
+                STAGING_Y_TOP - STAGING_PITCH * (k % SLOTS_PER_BENCH))
 
     def out_slot(self, j: int) -> tuple[float, float]:
-        return (OUT_X, OUT_Y0 - 0.10 * j)
+        """产出位 (y=OUT_Y 行, 自东 OUT_X 向西 0.12/槽 —— 东满优先,
+        A03 携托西行永不跨已落位)。"""
+        return (OUT_X + OUT_PITCH * j, OUT_Y)
 
     def _pallet_plan(self) -> list[tuple[str, float, float]]:
         """托盘播种表: 预载架位在前, 其余按暂存列序。"""
@@ -308,22 +364,19 @@ class LineCell(WarehouseCell):
         bodies = [g.xml() for g in self.geos.values()]
         bodies += [self.racks[n].xml() for n in self._line_racks]
         n_out = max(1, self._line_pallets - 2)
-        bodies.append(_bench_xml("stgA", STAGING_XS[0], 2.00,
-                                 2.00 + 0.10 * min(self.n_staging,
-                                                   SLOTS_PER_BENCH)))
-        if self.n_staging > SLOTS_PER_BENCH:
-            bodies.append(_bench_xml(
-                "stgB", STAGING_XS[1], 2.00,
-                2.00 + 0.10 * (self.n_staging - SLOTS_PER_BENCH)))
-        bodies.append(_bench_xml("out", OUT_X,
-                                 OUT_Y0 - 0.10 * (n_out - 1) - 0.05,
-                                 OUT_Y0 + 0.05))
+        rows_a = [STAGING_Y_TOP - STAGING_PITCH * r
+                  for r in range(self.n_staging)]
+        bodies.append(_bench_xml_staging("stgA", STAGING_X, rows_a))
+        bodies.append(_bench_xml_x(
+            "out", OUT_Y, OUT_X - 0.05,
+            OUT_X + OUT_PITCH * max(1, n_out - 1) + 0.05,
+            corridor_ys=(OUT_Y, 2.80)))
         plan = self._pallet_plan()
         for name, x, y in plan:
-            bodies.append(self._pallet_xml(name, x, y, PLANE_Z, 0.0))
+            bodies.append(_pallet_slim_xml(name, x, y, PLANE_Z))
         if self._with_wp:
             for _name, x, y in plan:
-                z = PLANE_Z + 0.020 + WP_HALF_XYZ[2] + 0.001
+                z = PLANE_Z + LPAL_TOP_DZ + WP_HALF_XYZ[2] + 0.003
                 bodies.append(_workpiece_xml("wp_" + _name[-3:], x, y, z))
         # 夹紧 weld (每托盘 × 每实现工位, 默认失活; 编译期记录相对位形)
         welds = "".join(
@@ -331,6 +384,12 @@ class LineCell(WarehouseCell):
             f'body2="{name}" active="false"/>'
             for sid, geo in self.geos.items() if geo.spec.implemented
             for name, _x, _y in plan)
+        # 顶升 weld (虚拟抓手, P0 卡车绑扎同源): AGV 销盘体 ↔ 托盘,
+        # 激活时锁当前位形 —— 拾放不受销行程/凸台悬挂几何约束
+        welds += "".join(
+            f'\n    <weld name="lift_{vid}_{name}" body1="{vid}_chassis" '
+            f'body2="{name}" active="false"/>'
+            for vid in self.agv_ids for name, _x, _y in plan)
         eq = f"\n  <equality>{welds}\n  </equality>" if welds else ""
         acts = "\n".join(g.actuators_xml() for g in self.geos.values())
         xml = xml.replace("  </worldbody>",
@@ -365,12 +424,10 @@ class LineCell(WarehouseCell):
         for sid, geo in self.geos.items():
             s = geo.spec.station_id
             press_aid = mujoco.mj_name2id(m, T.mjOBJ_ACTUATOR, f"line_{s}_press")
-            push_aid = mujoco.mj_name2id(m, T.mjOBJ_ACTUATOR, f"line_{s}_push")
             pj = mujoco.mj_name2id(m, T.mjOBJ_JOINT, f"line_{s}_press_j")
-            gj = mujoco.mj_name2id(m, T.mjOBJ_JOINT, f"line_{s}_push_j")
             hb = mujoco.mj_name2id(m, T.mjOBJ_BODY, f"line_press_{s}")
             fb = mujoco.mj_name2id(m, T.mjOBJ_BODY, f"line_fixt_{s}")
-            if min(press_aid, push_aid, pj, gj, hb, fb) < 0:
+            if min(press_aid, pj, hb, fb) < 0:
                 raise KeyError(f"工位机构未注入: {s}")
             hg = frozenset(g for g in range(m.ngeom)
                            if m.geom_bodyid[g] == hb
@@ -389,10 +446,18 @@ class LineCell(WarehouseCell):
                         raise KeyError(f"夹紧约束未注入: clamp_{s}_{name}")
                     welds[name] = eid
             self.presses[s] = PressHandle(
-                spec=geo.spec, geo=geo, press_aid=press_aid, push_aid=push_aid,
-                press_qadr=m.jnt_qposadr[pj], push_qadr=m.jnt_qposadr[gj],
+                spec=geo.spec, geo=geo, press_aid=press_aid,
+                press_qadr=m.jnt_qposadr[pj],
                 head_bid=hb, head_gids=hg, nest_strip_gids=nsg,
                 fixture_bid=fb, welds=welds)
+        self.lift_welds = {}
+        for vid in self.agv_ids:
+            for name, _x, _y in self._pallet_plan():
+                eid = mujoco.mj_name2id(m, T.mjOBJ_EQUALITY,
+                                        f"lift_{vid}_{name}")
+                if eid < 0:
+                    raise KeyError(f"顶升约束未注入: lift_{vid}_{name}")
+                self.lift_welds[vid, name] = eid
 
     # ------------------------------------------------------------ 操作
     def _press_of(self, pallet: str) -> PressHandle:
@@ -427,6 +492,33 @@ class LineCell(WarehouseCell):
     def clamp_active(self, pallet: str) -> bool:
         h = self._press_of(pallet)
         return bool(self.data.eq_active[h.welds[pallet]])
+
+    def grip(self, vid: str, pallet: str, on: bool) -> None:
+        """AGV 顶升 (虚拟抓手): 在**当前位形**锁定 pin 体 ↔ 托盘 weld
+        (eq_data 同 clamp 配方)。拾/放不受销行程与凸台悬挂几何约束
+        (P0 载托随车同源机制); on=False 仅失活, 托盘就地落座。"""
+        eid = self.lift_welds.get((vid, pallet))
+        if eid is None:
+            raise KeyError(f"未配置顶升约束: lift_{vid}_{pallet}")
+        if on:
+            mujoco.mj_forward(self.model, self.data)   # 刷新 d.xpos/xmat
+            m, d = self.model, self.data
+            b1 = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY,
+                                   f"{vid}_chassis")
+            b2 = self.pallets[pallet].bid
+            p1, p2 = d.xpos[b1], d.xpos[b2]
+            r1 = d.xmat[b1].reshape(3, 3)
+            q1, q2 = d.xquat[b1], d.xquat[b2]
+            ed = m.eq_data[eid]
+            ed[:] = 0.0
+            ed[3:6] = r1.T @ (p2 - p1)          # relpos (body1 局部)
+            ed[6:10] = _quat_mul(_quat_conj(q1), q2)
+            ed[10] = 1.0
+            mujoco.mj_forward(m, d)
+        self.data.eq_active[eid] = 1 if on else 0
+
+    def grip_active(self, vid: str, pallet: str) -> bool:
+        return bool(self.data.eq_active[self.lift_welds[vid, pallet]])
 
     def wp_pose(self, name: str) -> tuple[np.ndarray, np.ndarray]:
         w = self.workpieces[name]

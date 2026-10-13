@@ -46,8 +46,9 @@ def test_rack_xml_two_levels_and_agv_underpass():
     xml = geo.xml()
     assert 'name="rack_L-B1_strip_pp"' in xml            # L0 承托条带
     assert 'name="rack_L-B1_upper_pp"' in xml            # L1 上层
-    # L0 链: 台面顶 0.095, 梁底 > AGV 顶 0.062 (AGV 钻架下交接)
-    assert racks.L0_TOP_Z == 0.095
+    # L0 链: 产线平面 0.075 (顶升焊制式), 梁底 > AGV 顶 0.062
+    # (空车贴列下穿支承行, 净空 6.5mm)
+    assert racks.L0_TOP_Z == 0.075
     assert racks.L0_TOP_Z - 0.005 > 0.062
     # 立柱位置全表: 距 AGV 停位点 (架心) 最近 ≥0.15 (盘 r0.12+余量)
     for px, py in geo.leg_positions():

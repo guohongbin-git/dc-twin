@@ -24,7 +24,7 @@ class PressSpec:
     force_min_n: float               # 力剖面门限 (峰值 ≥)
     feed_pos_tol_m: float            # 上料到位容差 (L2a 几何级, xy)
     force_window_s: float = 0.30     # 力剖面采样窗 (触底后)
-    press_speed_mps: float = 0.008   # 冲压头升降速度
+    press_speed_mps: float = 0.012   # 冲压头升降速度
     push_speed_mps: float = 0.05     # 推料滑台速度
     implemented: bool = True         # 规划工位行可为 False (无机构)
     description: str = ""

@@ -2,7 +2,7 @@
 §14 叙事: 装瓶厂瓶坯/物料线边缓存)。
 
 几何参照 core warehouse_cell 货架/条带链生成, 但为「过桥门架」形制:
-AGV 顶升交接面 L0 与 stand 同链 (顶 0.095, AGV 钻入架下顶销交接),
+AGV 顶升交接面 L0 (顶升焊携托制式, 平面推导见 scene.PLANE_Z),
 上层 L1 为缓冲层 —— 2 层小架, 立柱全部落在 AGV 停位点包络之外
 (对角立柱, 内面距架心 ≥0.19 > 盘半径 0.12 + 余量)。
 
@@ -17,10 +17,12 @@ from sim.warehouse_cell import MatrixLayout, register_node_source
 
 #: 产线走廊 = dock_y 东延线 (r=4 泊位带的场外延伸; 走廊以南为产出区)
 LINE_CORRIDOR_Y = 2.10
-#: L0 承托面顶 (同 stand_top_z / truck bed: AGV 顶销交接链)
-L0_TOP_Z = 0.095
+#: L0 承托面顶 —— 产线自有平面 (0.075): 顶升焊携托 (P0 绑扎同源)
+#: 下, 拾取净空 16mm / 跨行净空 1mm 的可行域解 (销行程 0.030 与
+#: 凸台悬挂 0.030 的零和约束, 见 scene.PLANE 注释)
+L0_TOP_Z = 0.075
 #: L1 上层承托面顶 (层高 0.15, 同 core 货架层距)
-L1_TOP_Z = 0.245
+L1_TOP_Z = 0.225
 #: 架位 x (东场外, 间距 0.55; L-B1 为 ST-PRESS 主供料位)
 RACK_XS = (2.50, 3.05, 3.60)
 _RACK_NODES = ("L-B1", "L-B2", "L-B3")
@@ -89,14 +91,16 @@ class RackGeometry:
         for sx in (-0.19, 0.19):
             for zc, half in ((0.0910, 0.0020), (0.2410, 0.0020)):
                 parts.append(
-                    f'    <geom name="rack_{n}_string{"L" if zc < 0.15 else "U"}'
+                    f'    <geom name="rack_{n}_string{"L" if zc < L0_TOP_Z + 0.07 else "U"}'
                     f'{"p" if sx > 0 else "n"}" type="box" '
                     f'pos="{sx:.3f} 0 {zc:.4f}" size="0.006 0.110 {half:.4f}" '
                     f'rgba="0.30 0.32 0.36 1"/>')
         for lx, ly in self.leg_positions():
             parts.append(
                 f'    <geom name="rack_{n}_leg_{lx:.2f}_{ly:.2f}" type="box" '
-                f'pos="{lx - self.x:.3f} {ly - self.y:.3f} 0.1205" '
-                f'size="0.006 0.006 0.1205" rgba="0.22 0.24 0.28 1"/>')
+                f'pos="{lx - self.x:.3f} {ly - self.y:.3f} '
+                f'{(L1_TOP_Z + 0.002) / 2:.4f}" '
+                f'size="0.006 0.006 {(L1_TOP_Z + 0.002) / 2:.4f}" '
+                f'rgba="0.22 0.24 0.28 1"/>')
         parts.append("  </body>")
         return "\n".join(parts)
