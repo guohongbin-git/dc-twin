@@ -170,11 +170,15 @@ def _core_registrars() -> tuple[Callable, Callable]:
 
 def admit(p: EvolutionProposal, *,
           node_source_registrar: Callable | None = None,
-          event_kind_registrar: Callable | None = None) -> GateVerdict:
+          event_kind_registrar: Callable | None = None,
+          idempotent: bool = False) -> GateVerdict:
     """审查 + 落册: 审查不过不注册; 通过后按 kind 分派 core 注册表。
 
     注册器可注入 (测试/宿主替换); 缺省用 core 真接口, core 拒绝
-    (重名/非法) 抛 GateError。
+    (重名/非法) 抛 GateError。idempotent=True 仅限缺省 core 路径
+    (自进化闭环同进程多轮: 事件类型已在册且描述一致 → 幂等放行,
+    registered 记 @idempotent; 描述漂移仍拒绝 —— core 单调语义不
+    绕过, 同 line/evidence.py 的预检约定)。
     """
     verdict = review(p)
     if not verdict.approved:
@@ -184,8 +188,19 @@ def admit(p: EvolutionProposal, *,
     ek_reg = event_kind_registrar or ek_reg
     try:
         if p.kind == "event_kind":
-            kind = ek_reg(p.payload["kind"],
-                          p.payload.get("description", ""))
+            kind, desc = p.payload["kind"], p.payload.get("description", "")
+            if idempotent and node_source_registrar is None:
+                from services.world.evidence import EVENT_KINDS
+                if kind in EVENT_KINDS:
+                    if EVENT_KINDS[kind] == desc:
+                        return GateVerdict(
+                            p.proposal_id, True,
+                            registered=(f"event_kind:{kind}@idempotent",))
+                    raise GateError(
+                        f"场景进化门落册失败 ({p.proposal_id}): "
+                        f"事件类型 {kind} 已在册且描述漂移 "
+                        f"({EVENT_KINDS[kind]!r} != {desc!r})")
+            kind = ek_reg(kind, desc)
             return GateVerdict(p.proposal_id, True,
                                registered=(f"event_kind:{kind}",))
         fn = ns_reg(p.payload["fn"])

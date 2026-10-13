@@ -180,3 +180,22 @@ def test_admit_duplicate_event_kind_raises_gate_error():
     admit(p)
     with pytest.raises(GateError, match="GATE_PROBE_KIND2"):
         admit(p)
+
+
+def test_admit_idempotent_allows_same_description_only():
+    """闭环多轮: 同描述重注册幂等放行; 描述漂移仍拒绝。"""
+    if str(_CORE) not in sys.path:
+        sys.path.insert(0, str(_CORE))
+    from services.world.evidence import EVENT_KINDS
+    if "GATE_PROBE_KIND3" in EVENT_KINDS:
+        del EVENT_KINDS["GATE_PROBE_KIND3"]
+    p = _proposal(payload={"kind": "GATE_PROBE_KIND3",
+                           "description": "idempotent 探针"})
+    admit(p)
+    v = admit(p, idempotent=True)
+    assert v.approved
+    assert list(v.registered) == ["event_kind:GATE_PROBE_KIND3@idempotent"]
+    drifted = _proposal(payload={"kind": "GATE_PROBE_KIND3",
+                                 "description": "换了描述"})
+    with pytest.raises(GateError, match="描述漂移"):
+        admit(drifted, idempotent=True)

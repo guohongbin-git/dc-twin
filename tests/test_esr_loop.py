@@ -240,3 +240,19 @@ def test_crystallize_and_gate_agree_with_standalone_paths(tmp_path):
     assert phases["02-crystallize.json"]["record"] == standalone.to_dict()
     assert report.gate.proposal_id == \
         f"PROP-{standalone.incident_id}"
+
+
+def test_second_loop_iteration_same_process_is_idempotent(tmp_path):
+    """自进化闭环 (§18.①): 同进程第二轮 Loop 经 ④拍幂等放行。"""
+    import sys as _sys
+    _core = Path("~/1-Projects/desktop-agv-demo").expanduser().resolve()
+    if str(_core) not in _sys.path:
+        _sys.path.insert(0, str(_core))
+    r1 = ESRLoop(_config(tmp_path)).run()          # 缺省 core 注册器
+    r2 = ESRLoop(LoopConfig(loop_id="loop-detfix-002",
+                            incident_dir=FIXTURE,
+                            workspace=tmp_path / "esr-loop-2")).run()
+    assert r1.status == "complete" and r2.status == "complete"
+    assert list(r1.gate.registered) == ["event_kind:LANE_INTERLOCK"]
+    assert list(r2.gate.registered) == \
+        ["event_kind:LANE_INTERLOCK@idempotent"]

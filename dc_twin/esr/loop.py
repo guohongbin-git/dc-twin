@@ -355,9 +355,10 @@ class ESRLoop:
         }
 
     def _beat_evolve(self, record: IncidentRecord) -> GateVerdict:
-        """④ 场景进化: 契约修订草案 + 回归用例 + 消融子集 → 门。"""
+        """④ 场景进化: 契约修订草案 + 回归用例 + 消融子集 → 门
+        (闭环多轮: 同描述重注册幂等放行, 见 gate.admit)。"""
         proposal = self._proposal_from(record)
-        return admit(proposal,
+        return admit(proposal, idempotent=True,
                      node_source_registrar=self._ns_reg,
                      event_kind_registrar=self._ek_reg)
 
