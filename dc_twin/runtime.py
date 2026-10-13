@@ -161,9 +161,13 @@ def _animate_truck(cell, truck_id: str, y_to: float, *,
     return cell.data.time
 
 
+_FRAME_HOOK = None   # run_p0 独占流程的渲染钩子 (render_p0_demo 注入)
+
 def _advance(cell, t_target: float) -> None:
     while cell.data.time < t_target:
         cell.step(50)
+        if _FRAME_HOOK is not None:
+            _FRAME_HOOK()
 
 
 def _forged_frames(cell, tk_xy: tuple[float, float]) -> tuple[EvidenceFrame, ...]:
@@ -182,7 +186,8 @@ def _forged_frames(cell, tk_xy: tuple[float, float]) -> tuple[EvidenceFrame, ...
 
 # ---------------------------------------------------------------- 主幕
 def run_p0(*, faults=(), out_dir=None, timetable: TruckTimetable | None = None,
-           run_id: str | None = None) -> RunResult:
+           run_id: str | None = None, render_dir: str | None = None,
+           render_every: float = 0.5) -> RunResult:
     faults = frozenset(faults)
     unknown = faults - set(FAULTS)
     if unknown:
@@ -208,6 +213,27 @@ def run_p0(*, faults=(), out_dir=None, timetable: TruckTimetable | None = None,
         forklifts=("F01",), agvs=(CARRIER,),
         preload_stands=("D_G42",), seed_slots=[])
     cell.warmup(0.5)
+    frame_hook = None
+    if render_dir:
+        import mujoco
+        from pathlib import Path as _P
+        _rd = _P(render_dir); _rd.mkdir(parents=True, exist_ok=True)
+        _renderer = mujoco.Renderer(cell.model, height=720, width=1280)
+        _cam = mujoco.MjvCamera()
+        _cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+        _cam.lookat[:] = (0.0, 0.4, 0.0); _cam.distance = 5.2
+        _cam.azimuth = 155; _cam.elevation = -38
+        _state = {"next": 0.0, "n": 0}
+        def frame_hook():
+            if cell.data.time >= _state["next"]:
+                _renderer.update_scene(cell.data, camera=_cam)
+                import PIL.Image
+                PIL.Image.fromarray(_renderer.render()).save(
+                    _rd / f"f_{_state['n']:04d}.png")
+                _state["n"] += 1
+                _state["next"] = cell.data.time + render_every
+        global _FRAME_HOOK
+        _FRAME_HOOK = frame_hook
     runner = FleetRunner(cell)
     ledger = ShipmentLedger()
 
