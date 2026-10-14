@@ -10,6 +10,8 @@
 
 `Purpose: NATIVE AI` · `Type: FRAMEWORK REFERENCE` · `Evidence: RUN-PROVEN LOOP`
 
+![esr](https://img.shields.io/badge/ESR-Loop_v0.1_%E4%BA%94%E6%8B%8D%E9%97%AD%E7%8E%AF-6f42c1) ![gate](https://img.shields.io/badge/%E8%BF%9B%E5%8C%96%E9%97%A8-%E6%B6%88%E8%9E%8D%E5%BC%BA%E5%88%B6-2ea44f) ![sample](https://img.shields.io/badge/%E6%A0%B7%E6%9C%AC-DetFix_16runs%E2%86%923%E4%BF%AE%E5%A4%8D-blue) ![open](https://img.shields.io/badge/stack-MuJoCo_%C2%B7_three.js_%C2%B7_Python-orange) ![superset](https://img.shields.io/badge/SimReady-%E8%B6%85%E9%9B%86_+%E8%AF%81%E6%8D%AE%E5%A5%91%E7%BA%A6_+%E6%8A%80%E8%83%BD%E9%9D%A2-above)
+
 > 属于 **TopPrism Native AI** — 让组织级仿真能力在运行经验中持续复利的工程体系。
 
 **English overview:** dc-twin is the reference implementation of ESR, an
