@@ -1,0 +1,277 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  text2mujoco pilot scene: conveyor-to-arm handoff cell (T2M_HANDOFF_CELL)
+  SI meters, Z-up, gravity [0,0,-9.81], deterministic seed 7.
+  变体说明 (与 dc-twin 产线互补): 传送带 (六辊驱动辊床, 真实接触摩擦携运)
+  送纸箱 → 三关节臂 (yaw/lift/reach 立柱式) 抓取 → 放入分拣箱 → RGB-D 相机核验。
+  碰撞类 (conaffinity 全 7, 机器人自碰撞开启); 设计嵌套对在 <contact><exclude>
+  逐条列名; 每个 jointed body 的 geom 全部显式 mass; 位置伺服 gravcomp+高 kp。
+-->
+<mujoco model="t2m_handoff_cell">
+  <compiler angle="radian" coordinate="local" autolimits="true"/>
+  <option timestep="0.0005" gravity="0 0 -9.81"/>
+
+  <default>
+    <default class="world_part">
+      <geom contype="1" conaffinity="7" solref="0.001 1" density="800"/>
+    </default>
+    <default class="robot_part">
+      <geom contype="2" conaffinity="7" solref="0.001 1" friction="0.90 0.02 0.002"/>
+    </default>
+    <default class="payload_part">
+      <geom contype="4" conaffinity="7" solref="0.001 1" friction="0.50 0.01 0.002"/>
+    </default>
+  </default>
+
+  <visual>
+    <headlight ambient="0.35 0.35 0.35" diffuse="0.6 0.6 0.6"/>
+  </visual>
+
+  <asset>
+    <material name="mat_steel" rgba="0.55 0.57 0.60 1"/>
+    <material name="mat_safety" rgba="0.90 0.75 0.10 1"/>
+    <material name="mat_carton" rgba="0.78 0.62 0.39 1"/>
+    <material name="mat_bin" rgba="0.16 0.38 0.66 1"/>
+    <material name="mat_arm" rgba="0.85 0.30 0.20 1"/>
+    <material name="mat_marker_pick" rgba="0.95 0.20 0.20 1"/>
+    <material name="mat_marker_place" rgba="0.20 0.85 0.35 1"/>
+    <material name="mat_marker_verify" rgba="0.95 0.85 0.15 1"/>
+  </asset>
+
+  <worldbody>
+    <light name="top_light" pos="0 0 2.2" dir="0 0 -1" diffuse="0.8 0.8 0.8"/>
+    <geom name="ground_geom" class="world_part" type="plane" size="3 3 0.1"
+          friction="0.80 0.01 0.002"/>
+
+    <!-- ============ 输送段: 机架 + 六辊驱动辊床 + 末端挡停 ============ -->
+    <body name="conveyor_frame" pos="0 0 0">
+      <geom name="conv_rail_l" class="world_part" type="box"
+            pos="-0.395  0.170 0.115" size="0.265 0.008 0.015" mass="0.8"
+            material="mat_steel"/>
+      <geom name="conv_rail_r" class="world_part" type="box"
+            pos="-0.395 -0.170 0.115" size="0.265 0.008 0.015" mass="0.8"
+            material="mat_steel"/>
+      <geom name="conv_leg_fl" class="world_part" type="box"
+            pos="-0.645  0.170 0.050" size="0.008 0.008 0.050" mass="0.3"
+            material="mat_steel"/>
+      <geom name="conv_leg_fr" class="world_part" type="box"
+            pos="-0.645 -0.170 0.050" size="0.008 0.008 0.050" mass="0.3"
+            material="mat_steel"/>
+      <geom name="conv_leg_bl" class="world_part" type="box"
+            pos="-0.145  0.170 0.050" size="0.008 0.008 0.050" mass="0.3"
+            material="mat_steel"/>
+      <geom name="conv_leg_br" class="world_part" type="box"
+            pos="-0.145 -0.170 0.050" size="0.008 0.008 0.050" mass="0.3"
+            material="mat_steel"/>
+      <geom name="conv_end_up" class="world_part" type="box"
+            pos="-0.655 0 0.080" size="0.008 0.170 0.050" mass="0.4"
+            material="mat_steel"/>
+      <geom name="conv_end_down" class="world_part" type="box"
+            pos="-0.140 0 0.080" size="0.008 0.170 0.050" mass="0.4"
+            material="mat_steel"/>
+      <!-- 末端挡停: 箱体被驱动辊床推到 x=-0.21 处停止 (挡停面 -0.161) -->
+      <geom name="conv_stopper" class="world_part" type="box"
+            pos="-0.1665 0 0.225" size="0.006 0.160 0.020" mass="0.2"
+            material="mat_safety"/>
+
+      <!-- 辊轴 (父侧绘制, 贯穿辊芯): 连续性 = 辊体-机架零间隙 -->
+      <geom name="axle_1" class="world_part" type="cylinder"
+            quat="0.707107 0.707107 0 0" pos="-0.610 0 0.160"
+            size="0.008 0.170" mass="0.05" material="mat_steel"/>
+      <geom name="axle_2" class="world_part" type="cylinder"
+            quat="0.707107 0.707107 0 0" pos="-0.525 0 0.160"
+            size="0.008 0.170" mass="0.05" material="mat_steel"/>
+      <geom name="axle_3" class="world_part" type="cylinder"
+            quat="0.707107 0.707107 0 0" pos="-0.440 0 0.160"
+            size="0.008 0.170" mass="0.05" material="mat_steel"/>
+      <geom name="axle_4" class="world_part" type="cylinder"
+            quat="0.707107 0.707107 0 0" pos="-0.355 0 0.160"
+            size="0.008 0.170" mass="0.05" material="mat_steel"/>
+      <geom name="axle_5" class="world_part" type="cylinder"
+            quat="0.707107 0.707107 0 0" pos="-0.270 0 0.160"
+            size="0.008 0.170" mass="0.05" material="mat_steel"/>
+      <geom name="axle_6" class="world_part" type="cylinder"
+            quat="0.707107 0.707107 0 0" pos="-0.185 0 0.160"
+            size="0.008 0.170" mass="0.05" material="mat_steel"/>
+
+      <!-- 六根驱动辊 (真实铰链 + 速度伺服): 摩擦携运, 不改写 qpos -->
+      <body name="roller_1" pos="-0.610 0 0.160" gravcomp="1">
+        <joint name="roller_1_hinge" type="hinge" axis="0 1 0" damping="0.002"
+               armature="0.0004"/>
+        <geom name="roller_1_geom" class="robot_part" type="cylinder"
+              quat="0.707107 0.707107 0 0" size="0.040 0.160" mass="0.15"
+              material="mat_steel"/>
+      </body>
+      <body name="roller_2" pos="-0.525 0 0.160" gravcomp="1">
+        <joint name="roller_2_hinge" type="hinge" axis="0 1 0" damping="0.002"
+               armature="0.0004"/>
+        <geom name="roller_2_geom" class="robot_part" type="cylinder"
+              quat="0.707107 0.707107 0 0" size="0.040 0.160" mass="0.15"
+              material="mat_steel"/>
+      </body>
+      <body name="roller_3" pos="-0.440 0 0.160" gravcomp="1">
+        <joint name="roller_3_hinge" type="hinge" axis="0 1 0" damping="0.002"
+               armature="0.0004"/>
+        <geom name="roller_3_geom" class="robot_part" type="cylinder"
+              quat="0.707107 0.707107 0 0" size="0.040 0.160" mass="0.15"
+              material="mat_steel"/>
+      </body>
+      <body name="roller_4" pos="-0.355 0 0.160" gravcomp="1">
+        <joint name="roller_4_hinge" type="hinge" axis="0 1 0" damping="0.002"
+               armature="0.0004"/>
+        <geom name="roller_4_geom" class="robot_part" type="cylinder"
+              quat="0.707107 0.707107 0 0" size="0.040 0.160" mass="0.15"
+              material="mat_steel"/>
+      </body>
+      <body name="roller_5" pos="-0.270 0 0.160" gravcomp="1">
+        <joint name="roller_5_hinge" type="hinge" axis="0 1 0" damping="0.002"
+               armature="0.0004"/>
+        <geom name="roller_5_geom" class="robot_part" type="cylinder"
+              quat="0.707107 0.707107 0 0" size="0.040 0.160" mass="0.15"
+              material="mat_steel"/>
+      </body>
+      <body name="roller_6" pos="-0.185 0 0.160" gravcomp="1">
+        <joint name="roller_6_hinge" type="hinge" axis="0 1 0" damping="0.002"
+               armature="0.0004"/>
+        <geom name="roller_6_geom" class="robot_part" type="cylinder"
+              quat="0.707107 0.707107 0 0" size="0.040 0.160" mass="0.15"
+              material="mat_steel"/>
+      </body>
+    </body>
+
+    <!-- 纸箱 (payload, free joint): 起点 x=-0.55, 顶面 z=0.30 -->
+    <body name="carton" pos="-0.550 0 0.2515">
+      <freejoint name="carton_free"/>
+      <geom name="carton_geom" class="payload_part" type="box"
+            size="0.050 0.050 0.050" mass="0.30" material="mat_carton"/>
+    </body>
+
+    <!-- ============ 分拣箱 (open_box 五片, 静态) ============ -->
+    <body name="sort_bin" pos="0 0 0">
+      <geom name="bin_bottom" class="world_part" type="box"
+            pos="0.450 0 0.020" size="0.160 0.160 0.020" mass="1.2"
+            material="mat_bin"/>
+      <geom name="bin_wall_front" class="world_part" type="box"
+            pos="0.450 -0.155 0.100" size="0.160 0.005 0.100" mass="0.5"
+            material="mat_bin"/>
+      <geom name="bin_wall_back" class="world_part" type="box"
+            pos="0.450  0.155 0.100" size="0.160 0.005 0.100" mass="0.5"
+            material="mat_bin"/>
+      <geom name="bin_wall_left" class="world_part" type="box"
+            pos="0.295 0 0.100" size="0.005 0.150 0.100" mass="0.5"
+            material="mat_bin"/>
+      <geom name="bin_wall_right" class="world_part" type="box"
+            pos="0.605 0 0.100" size="0.005 0.150 0.100" mass="0.5"
+            material="mat_bin"/>
+    </body>
+
+    <!-- ============ 三关节臂 (yaw/lift/reach 立柱式) ============ -->
+    <body name="arm_base" pos="0 0 0">
+      <geom name="base_pedestal" class="robot_part" type="cylinder"
+            pos="0 0 0.050" size="0.060 0.050" mass="2.0" material="mat_arm"/>
+
+    <body name="yaw_body" pos="0 0 0.100" gravcomp="1">
+      <joint name="arm_yaw" type="hinge" axis="0 0 1" range="-3.5 3.5"
+             damping="4.0" armature="0.010"/>
+      <geom name="yaw_hub" class="robot_part" type="cylinder"
+            pos="0 0 0.020" size="0.045 0.020" mass="0.4" material="mat_arm"/>
+      <!-- lift 套筒 (父侧, 覆盖全程 -0.42..0): 世界 z 0.16..0.78 -->
+      <geom name="lift_sleeve" class="robot_part" type="cylinder"
+            pos="0 0 0.330" size="0.032 0.310" mass="0.5" material="mat_steel"/>
+
+    <body name="carriage" pos="0 0 0.700" gravcomp="1">
+      <joint name="arm_lift" type="slide" axis="0 0 1" range="-0.450 0"
+             damping="6.0" armature="0.010"
+             solreflimit="0.004 1" solimplimit="0.99 0.999 0.0005"/>
+      <geom name="tool_plate" class="robot_part" type="box"
+            size="0.050 0.030 0.006" mass="0.08" material="mat_arm"/>
+      <!-- lift 活塞 (动侧): 全行程均位于套筒内 (z plate-0.10..plate) -->
+      <geom name="lift_ram" class="robot_part" type="cylinder"
+            pos="0 0 -0.050" size="0.024 0.050" mass="0.15" material="mat_steel"/>
+      <!-- reach 套筒 (父侧, 轴向 x): 局部 x -0.005..0.515 覆盖全行程 -->
+      <geom name="reach_sleeve" class="robot_part" type="cylinder"
+            quat="0.707107 0 0.707107 0"
+            pos="0.255 0 -0.015" size="0.020 0.260" mass="0.25"
+            material="mat_steel"/>
+
+    <body name="reach_body" pos="0.100 0 0" gravcomp="1">
+      <joint name="arm_reach" type="slide" axis="1 0 0" range="0 0.360"
+             damping="4.0" armature="0.008"
+             solreflimit="0.004 1" solimplimit="0.99 0.999 0.0005"/>
+      <geom name="tool_plate_fwd" class="robot_part" type="box"
+            size="0.050 0.090 0.006" mass="0.08" material="mat_arm"/>
+      <!-- reach 活塞 (动侧): q=0 时 x 0.045..0.145, q=0.36 时 x 0.405..0.505 全程在套筒内 -->
+      <geom name="reach_ram" class="robot_part" type="cylinder"
+            quat="0.707107 0 0.707107 0"
+            pos="-0.005 0 -0.015" size="0.014 0.050" mass="0.08"
+            material="mat_steel"/>
+      <site name="tcp_site" pos="0.030 0 0" size="0.004" group="4"
+            rgba="0 0 0 0"/>
+      <!-- 平行夹爪: 指内侧闭合位 x face = 0.075-d-0.006; d=0 开 (0.069),
+           d=0.030 闭合指令 (接触限制在 d≈0.019 → 指面贴合箱面 0.050);
+           指体上端嵌入加宽工具板 (槽位嵌套, -0.063..-0.003) -->
+      <body name="finger_l" pos="0.030 0.075 -0.006" gravcomp="1">
+        <joint name="finger_l_slide" type="slide" axis="0 -1 0" range="0 0.030"
+               damping="1.5" armature="0.0008"
+               solreflimit="0.004 1" solimplimit="0.99 0.999 0.0005"/>
+        <geom name="finger_l_geom" class="robot_part" type="box"
+              pos="0 0 -0.033" size="0.008 0.006 0.030" mass="0.02"
+              material="mat_steel"/>
+      </body>
+      <body name="finger_r" pos="0.030 -0.075 -0.006" gravcomp="1">
+        <joint name="finger_r_slide" type="slide" axis="0 1 0" range="0 0.030"
+               damping="1.5" armature="0.0008"
+               solreflimit="0.004 1" solimplimit="0.99 0.999 0.0005"/>
+        <geom name="finger_r_geom" class="robot_part" type="box"
+              pos="0 0 -0.033" size="0.008 0.006 0.030" mass="0.02"
+              material="mat_steel"/>
+      </body>
+    </body>
+    </body>
+    </body>
+    </body>
+
+    <!-- RGB-D 相机 (固定, 场景正前方) -->
+    <camera name="handoff_cam" pos="0 -1.10 1.05"
+            xyaxes="1 0 0  0 0.588 0.809"/>
+
+    <!-- 任务标记: 贴在所标注静态表面上的薄圆盘 (decal, group=2) -->
+    <site name="feed_zone_marker" type="cylinder" pos="-0.550  0.170 0.136"
+          size="0.020 0.006" material="mat_marker_pick" group="2"/>
+    <site name="pick_zone_marker" type="cylinder" pos="-0.210 -0.170 0.136"
+          size="0.020 0.006" material="mat_marker_pick" group="2"/>
+    <site name="place_zone_marker" type="cylinder" pos="0.450  0.090 0.046"
+          size="0.018 0.006" material="mat_marker_place" group="2"/>
+    <site name="verify_zone_marker" type="cylinder" pos="0.535 -0.090 0.046"
+          size="0.015 0.006" material="mat_marker_verify" group="2"/>
+  </worldbody>
+
+  <actuator>
+    <position name="yaw_servo"     joint="arm_yaw"  kp="80"  kv="12" ctrlrange="-3.5 3.5"/>
+    <position name="lift_servo"    joint="arm_lift" kp="500" kv="25" ctrlrange="-0.450 0"/>
+    <position name="reach_servo"   joint="arm_reach" kp="250" kv="18" ctrlrange="0 0.360"/>
+    <position name="finger_l_servo" joint="finger_l_slide" kp="80" kv="6" ctrlrange="0 0.030"/>
+    <position name="finger_r_servo" joint="finger_r_slide" kp="80" kv="6" ctrlrange="0 0.030"/>
+    <velocity name="roller_1_motor" joint="roller_1_hinge" kv="0.8" ctrlrange="0 6"/>
+    <velocity name="roller_2_motor" joint="roller_2_hinge" kv="0.8" ctrlrange="0 6"/>
+    <velocity name="roller_3_motor" joint="roller_3_hinge" kv="0.8" ctrlrange="0 6"/>
+    <velocity name="roller_4_motor" joint="roller_4_hinge" kv="0.8" ctrlrange="0 6"/>
+    <velocity name="roller_5_motor" joint="roller_5_hinge" kv="0.8" ctrlrange="0 6"/>
+    <velocity name="roller_6_motor" joint="roller_6_hinge" kv="0.8" ctrlrange="0 6"/>
+  </actuator>
+
+  <equality>
+    <!-- 抓取焊联: 声明即失活; 闭合瞬间按实测偏移写 relpose 后激活
+         (body1 = 工具侧 reach_body, relpose = carton 在 reach 系位形) -->
+    <weld name="grasp_weld" body1="reach_body" body2="carton"
+          active="false" solref="0.005 1" solimp="0.96 0.99 0.001"/>
+  </equality>
+
+  <contact>
+    <!-- 设计嵌套对逐条列名 (升降/横移套筒-活塞, 工具板-立柱套筒, 指槽-板) -->
+    <exclude name="lift_sleeve_nest"   body1="carriage"   body2="yaw_body"/>
+    <exclude name="reach_sleeve_nest"  body1="reach_body" body2="carriage"/>
+    <exclude name="finger_l_slot_nest" body1="finger_l"   body2="reach_body"/>
+    <exclude name="finger_r_slot_nest" body1="finger_r"   body2="reach_body"/>
+  </contact>
+</mujoco>

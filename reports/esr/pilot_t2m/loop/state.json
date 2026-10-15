@@ -1,0 +1,19 @@
+{
+  "schema": "esr.loop_state/0.1",
+  "loop_id": "loop-t2m-pilot-001",
+  "config": {
+    "loop_id": "loop-t2m-pilot-001",
+    "incident_dir": "/Users/guohongbin/1-Projects/dc-twin/tests/fixtures/esr/pilot_t2m",
+    "workspace": "/Users/guohongbin/1-Projects/dc-twin/reports/esr/pilot_t2m/loop"
+  },
+  "beats_done": [
+    "run",
+    "crystallize",
+    "consolidate",
+    "evolve",
+    "ablate"
+  ],
+  "status": "complete",
+  "beat_errors": {},
+  "updated": "2026-10-15T03:19:10+00:00"
+}

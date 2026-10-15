@@ -1,0 +1,221 @@
+{
+  "schema_version": "1.0",
+  "backend": "mujoco",
+  "source_prompt": "生成一个传送带-机械臂交接分拣单元 (conveyor-to-arm handoff): 六辊驱动辊床输送线把纸箱送到末端挡停取件位, 一台三关节立柱式机械臂 (底座回转 + 垂直升降 + 水平横移, 平行夹爪) 在取件位闭合夹爪抓取纸箱, 回转搬运放入分拣箱, 最后由固定 RGB-D 相机核验交接结果。要求传送带真实携运 (摩擦/接触), 不得逐帧改写箱体 qpos。",
+  "assumptions": [
+    "使用 SI 米制、Z 轴向上、重力 [0, 0, -9.81] 和确定性种子 7; 全部使用 MJCF primitive, 不依赖下载网格。",
+    "MuJoCo 没有输送带图元, 且实测表明箱体驱运不能走辊冠摩擦直携 (线接触上周期俯仰失稳 ±2 cm) 也不能把牵引力加在底面 (r×F 使箱后仰): 因此传送带建成六辊驱动辊床 (每辊真实铰链 + 速度伺服, 线速度与带速一致), 箱体驱运 = 有界牵引力 (mj_applyFT 作用于质心, 仅在箱-辊真实接触存在时施加, 力上限 0.8·μmg ≈ 2.1 N, 净力与带面摩擦等价), 距挡停带 5 mm 切断由摩擦自行制动; 不写箱体 qpos。",
+    "机械臂为三关节立柱式 (arm_yaw 回转 + arm_lift 升降 + arm_reach 横移) 外加左右夹爪滑动关节。按任务规格不设腕部俯仰: 放件发生在箱口正上方, 撤离为纯竖直提升 + 回转, 无沿来路拖拽工具柱的行程。",
+    "抓取由声明为 active=\"false\" 的 <equality><weld> 承担, 夹爪指令闭合到指面贴住箱面 (接触限制) 的瞬间按实测偏移写入 relpose 并激活; 释放即取消激活, 由重力与箱体碰撞完成沉降, 空中释放会掉落。",
+    "分拣箱为五片式开放容器 (底 + 四壁), 内腔 0.30 x 0.30 m, 壁高 0.20 m, 箱底顶面 z=0.04。",
+    "升降/横移轴按套筒(父侧)+活塞(动侧)绘制, 全行程连续覆盖, 连续性阈值 5 mm; 碰撞类 world_part(1/7)、robot_part(2/7)、payload_part(4/7), conaffinity 全 7, 机器人自碰撞开启, 设计嵌套对在 <contact> 逐条列名。",
+    "每个 jointed body 的 geom 均显式 mass; 位置伺服 gravcomp=\"1\" 全子树 (含指尖) + 高 kp, 保持 qpos0 漂移 << 2 mm/1°。",
+    "取件位由挡停面几何决定: 箱体停在 x=-0.21, 三关节臂以笛卡尔安全 waypoints (高位回转 → 高位横移 → 竖直下探) 接近, 箱体到位容差 ±0.03 m。",
+    " timestep 0.0005 + 接触 solref 0.001 (时间常数 = 2·timestep 下限): 挡停持续推压、复位静置与入箱落底的接触深度均 << 1 mm 审计阈; 六辊以辊轴 (父侧绘制) 挂装于机架, 连续性零间隙。",
+    "任务标记为贴在静态表面上的薄圆盘 (辊床侧轨顶 / 箱底), 工具中心 tcp_site 为 group=4 运动学参考不绘制。",
+    "RGB-D 相机固定于场景前方 (0, -1.10, 1.05), 视轴指向场景中心 (0, 0, 0.25), 输出 640 x 480 RGB-D。"
+  ],
+  "open_questions": [],
+  "scene": {
+    "name": "t2m_handoff_cell",
+    "description": "conveyor-to-arm handoff pilot: 六辊辊床送箱 → 三关节臂抓取 → 分拣箱 → RGB-D 核验",
+    "runtime": {
+      "mujoco_version": "3.14.0",
+      "mode": "python",
+      "headless": true,
+      "gl_backend": "auto"
+    },
+    "world": {
+      "units": "m",
+      "up_axis": "Z",
+      "gravity": [0, 0, -9.81],
+      "ground": true,
+      "seed": 7
+    }
+  },
+  "assets": [
+    {
+      "id": "handoff_arm",
+      "kind": "robot",
+      "source": "./model.xml",
+      "body_name": "arm_base",
+      "pose": {"position": [0, 0, 0], "orientation_xyzw": [0, 0, 0, 1]},
+      "physics": {"dynamic": false, "contype": 2, "conaffinity": 7},
+      "exports": {
+        "body": ["yaw_body", "carriage", "reach_body", "finger_l", "finger_r"],
+        "joint": ["arm_yaw", "arm_lift", "arm_reach", "finger_l_slide", "finger_r_slide"],
+        "actuator": ["yaw_servo", "lift_servo", "reach_servo", "finger_l_servo", "finger_r_servo"],
+        "site": ["tcp_site"]
+      },
+      "semantic": "three_joint_column_handoff_arm"
+    },
+    {
+      "id": "conveyor_rig",
+      "kind": "robot",
+      "source": "./model.xml",
+      "body_name": "conveyor_frame",
+      "pose": {"position": [0, 0, 0], "orientation_xyzw": [0, 0, 0, 1]},
+      "physics": {"dynamic": false, "contype": 1, "conaffinity": 7},
+      "exports": {
+        "body": ["roller_1", "roller_2", "roller_3", "roller_4", "roller_5", "roller_6"],
+        "joint": ["roller_1_hinge", "roller_2_hinge", "roller_3_hinge", "roller_4_hinge", "roller_5_hinge", "roller_6_hinge"],
+        "actuator": ["roller_1_motor", "roller_2_motor", "roller_3_motor", "roller_4_motor", "roller_5_motor", "roller_6_motor"]
+      },
+      "semantic": "driven_roller_bed_conveyor"
+    },
+    {
+      "id": "carton",
+      "kind": "primitive",
+      "body_name": "carton",
+      "geometry": {"shape": "box", "dimensions": [0.1, 0.1, 0.1], "geom_name": "carton_geom"},
+      "pose": {"position": [-0.55, 0, 0.2515], "orientation_xyzw": [0, 0, 0, 1]},
+      "physics": {
+        "dynamic": true,
+        "joint_name": "carton_free",
+        "mass_kg": 0.3,
+        "contype": 4,
+        "conaffinity": 7,
+        "friction": [0.5, 0.01, 0.002]
+      }
+    },
+    {
+      "id": "sort_bin",
+      "kind": "primitive",
+      "body_name": "sort_bin",
+      "geometry": {
+        "shape": "open_box",
+        "dimensions": [0.32, 0.32, 0.20],
+        "interior_bounds": {"min": [-0.15, -0.15, 0.04], "max": [0.15, 0.15, 0.20]},
+        "part_geom_names": ["bin_bottom", "bin_wall_front", "bin_wall_back", "bin_wall_left", "bin_wall_right"]
+      },
+      "pose": {"position": [0.45, 0, 0], "orientation_xyzw": [0, 0, 0, 1]},
+      "physics": {"dynamic": false, "contype": 1, "conaffinity": 7, "friction": [0.7, 0.01, 0.002]}
+    }
+  ],
+  "interaction_points": [
+    {
+      "id": "belt_feed",
+      "affordance": "convey",
+      "target": {"type": "actuator", "name": "roller_1_motor"},
+      "marker_site": "feed_zone_marker",
+      "pose": {"position": [-0.55, 0.17, 0.136], "orientation_xyzw": [0, 0, 0, 1]},
+      "action": {
+        "mode": "direct",
+        "command": "belt_feed",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "surface_speed_mps": {"type": "number", "minimum": 0.02, "maximum": 0.3}
+          },
+          "required": [],
+          "additionalProperties": false
+        }
+      },
+      "preconditions": ["carton_state == 'on_belt'", "belt_state == 'stopped'"],
+      "success_conditions": ["-0.24 <= carton_x <= -0.18", "carton_speed_mps < 0.05", "carton_state == 'at_pick'"],
+      "depends_on": [],
+      "effects": ["belt_state = 'stopped'", "carton_state = 'at_pick'"],
+      "reset": {"belt_state": "stopped", "carton_state": "on_belt"}
+    },
+    {
+      "id": "approach_pick",
+      "affordance": "reach",
+      "target": {"type": "joint", "name": "arm_yaw"},
+      "marker_site": "pick_zone_marker",
+      "pose": {"position": [-0.21, -0.17, 0.136], "orientation_xyzw": [0, 0, 0, 1]},
+      "action": {
+        "mode": "direct",
+        "command": "approach_pick",
+        "schema": {"type": "object", "properties": {}, "required": [], "additionalProperties": false}
+      },
+      "preconditions": ["carton_state == 'at_pick'", "arm_state == 'home'"],
+      "success_conditions": ["arm_state == 'at_pick'", "|tcp_x - (-0.21)| <= 0.005", "gripper_state == 'open'"],
+      "depends_on": ["belt_feed"],
+      "effects": ["arm_state = 'at_pick'"],
+      "reset": {"arm_state": "home"}
+    },
+    {
+      "id": "grip_close",
+      "affordance": "grasp",
+      "target": {"type": "actuator", "name": "finger_l_servo"},
+      "pose": {"position": [-0.21, -0.17, 0.136], "orientation_xyzw": [0, 0, 0, 1]},
+      "action": {
+        "mode": "direct",
+        "command": "grip_close",
+        "schema": {"type": "object", "properties": {"close": {"type": "boolean"}}, "required": ["close"], "additionalProperties": false}
+      },
+      "preconditions": ["arm_state == 'at_pick'", "carton_state == 'at_pick'"],
+      "success_conditions": ["gripper_state == 'closed'", "grasp_weld_active == true", "carton_state == 'grasped'"],
+      "depends_on": ["approach_pick"],
+      "effects": ["gripper_state = 'closed'", "carton_state = 'grasped'"],
+      "reset": {"gripper_state": "open", "carton_state": "on_belt"}
+    },
+    {
+      "id": "place_box",
+      "affordance": "transport",
+      "target": {"type": "joint", "name": "arm_lift"},
+      "marker_site": "place_zone_marker",
+      "pose": {"position": [0.45, 0.09, 0.046], "orientation_xyzw": [0, 0, 0, 1]},
+      "action": {
+        "mode": "direct",
+        "command": "place_box",
+        "schema": {"type": "object", "properties": {}, "required": [], "additionalProperties": false}
+      },
+      "preconditions": ["carton_state == 'grasped'", "gripper_state == 'closed'"],
+      "success_conditions": ["grasp_weld_active == false", "carton_state == 'in_bin'", "carton_speed_mps < 0.05", "arm_state == 'home'"],
+      "depends_on": ["grip_close"],
+      "effects": ["gripper_state = 'open'", "carton_state = 'in_bin'", "arm_state = 'home'"],
+      "reset": {"gripper_state": "open", "carton_state": "on_belt", "arm_state": "home"}
+    },
+    {
+      "id": "verify_sort",
+      "affordance": "inspect",
+      "target": {"type": "camera", "name": "handoff_cam"},
+      "marker_site": "verify_zone_marker",
+      "pose": {"position": [0.535, -0.09, 0.046], "orientation_xyzw": [0, 0, 0, 1]},
+      "action": {
+        "mode": "direct",
+        "command": "verify_sort",
+        "schema": {"type": "object", "properties": {}, "required": [], "additionalProperties": false}
+      },
+      "preconditions": ["carton_state == 'in_bin'"],
+      "success_conditions": ["carton inside sort_bin interior", "handoff RGB-D capture valid", "task_state == 'verified'"],
+      "depends_on": ["place_box"],
+      "effects": ["task_state = 'verified'"],
+      "reset": {"task_state": "pending"}
+    }
+  ],
+  "sensors": [
+    {
+      "id": "handoff_rgbd",
+      "type": "camera",
+      "camera_name": "handoff_cam",
+      "frequency_hz": 30,
+      "data": ["rgb", "depth", "camera_pose"],
+      "pose": {"position": [0, -1.10, 1.05], "orientation_xyzw": [0.454, 0, 0, 0.891]}
+    }
+  ],
+  "task": {
+    "goal": "传送带把纸箱送到取件位, 三关节臂抓取纸箱放入分拣箱, RGB-D 相机核验交接结果。",
+    "success_conditions": [
+      "carton 静止于 sort_bin 内腔且 weld 已释放",
+      "五步依赖序 belt_feed → approach_pick → grip_close → place_box → verify_sort 全部达成",
+      "全程接触深度不超审计阈 (起点 -1e-4, 序列 -1e-3)"
+    ],
+    "failure_conditions": [
+      "carton 离开辊床/掉出场景",
+      "任一步接触深度超审计阈",
+      "复位后重放状态不一致 (determinism 破坏)"
+    ],
+    "reset_policy": "mj_resetData_and_task_state (含 weld 失活、伺服 ctrl 清零、事件状态复位)"
+  },
+  "outputs": {
+    "save_mjcf": true,
+    "mjcf_path": "./model.xml",
+    "save_mjb": true,
+    "mjb_path": "./output/model.mjb",
+    "resolution": [640, 480],
+    "screenshots": ["./output/screenshots/before.png", "./output/screenshots/after.png"],
+    "depth": ["./output/screenshots/after_depth.npy"]
+  }
+}

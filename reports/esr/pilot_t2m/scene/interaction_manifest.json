@@ -1,0 +1,85 @@
+{
+  "schema_version": "1.0",
+  "backend": "mujoco",
+  "source": "scene_spec.json",
+  "scene": "t2m_handoff_cell",
+  "action_envelope": {
+    "type": "object",
+    "properties": {"id": {"type": "string"}, "payload": {"type": "object"}},
+    "required": ["id", "payload"],
+    "additionalProperties": false
+  },
+  "dependency_order": [
+    "belt_feed",
+    "approach_pick",
+    "grip_close",
+    "place_box",
+    "verify_sort"
+  ],
+  "interaction_points": [
+    {
+      "id": "belt_feed",
+      "target": {"type": "actuator", "name": "roller_1_motor"},
+      "marker_site": "feed_zone_marker",
+      "pose": {"position": [-0.55, 0.17, 0.136], "orientation_xyzw": [0, 0, 0, 1]},
+      "affordance": "convey",
+      "action": {"mode": "direct", "command": "belt_feed", "schema": {"type": "object", "properties": {"surface_speed_mps": {"type": "number", "minimum": 0.02, "maximum": 0.3}}, "required": [], "additionalProperties": false}},
+      "preconditions": ["carton_state == 'on_belt'", "belt_state == 'stopped'"],
+      "success_conditions": ["-0.24 <= carton_x <= -0.18", "carton_speed_mps < 0.05", "carton_state == 'at_pick'"],
+      "depends_on": [],
+      "effects": ["belt_state = 'stopped'", "carton_state = 'at_pick'"],
+      "reset": {"belt_state": "stopped", "carton_state": "on_belt"}
+    },
+    {
+      "id": "approach_pick",
+      "target": {"type": "joint", "name": "arm_yaw"},
+      "marker_site": "pick_zone_marker",
+      "pose": {"position": [-0.21, -0.17, 0.136], "orientation_xyzw": [0, 0, 0, 1]},
+      "affordance": "reach",
+      "action": {"mode": "direct", "command": "approach_pick", "schema": {"type": "object", "properties": {}, "required": [], "additionalProperties": false}},
+      "preconditions": ["carton_state == 'at_pick'", "arm_state == 'home'"],
+      "success_conditions": ["arm_state == 'at_pick'", "|tcp_x - (-0.21)| <= 0.005", "gripper_state == 'open'"],
+      "depends_on": ["belt_feed"],
+      "effects": ["arm_state = 'at_pick'"],
+      "reset": {"arm_state": "home"}
+    },
+    {
+      "id": "grip_close",
+      "target": {"type": "actuator", "name": "finger_l_servo"},
+      "pose": {"position": [-0.21, -0.17, 0.136], "orientation_xyzw": [0, 0, 0, 1]},
+      "affordance": "grasp",
+      "action": {"mode": "direct", "command": "grip_close", "schema": {"type": "object", "properties": {"close": {"type": "boolean"}}, "required": ["close"], "additionalProperties": false}},
+      "preconditions": ["arm_state == 'at_pick'", "carton_state == 'at_pick'"],
+      "success_conditions": ["gripper_state == 'closed'", "grasp_weld_active == true", "carton_state == 'grasped'"],
+      "depends_on": ["approach_pick"],
+      "effects": ["gripper_state = 'closed'", "carton_state = 'grasped'"],
+      "reset": {"gripper_state": "open", "carton_state": "on_belt"}
+    },
+    {
+      "id": "place_box",
+      "target": {"type": "joint", "name": "arm_lift"},
+      "marker_site": "place_zone_marker",
+      "pose": {"position": [0.45, 0.09, 0.046], "orientation_xyzw": [0, 0, 0, 1]},
+      "affordance": "transport",
+      "action": {"mode": "direct", "command": "place_box", "schema": {"type": "object", "properties": {}, "required": [], "additionalProperties": false}},
+      "preconditions": ["carton_state == 'grasped'", "gripper_state == 'closed'"],
+      "success_conditions": ["grasp_weld_active == false", "carton_state == 'in_bin'", "carton_speed_mps < 0.05", "arm_state == 'home'"],
+      "depends_on": ["grip_close"],
+      "effects": ["gripper_state = 'open'", "carton_state = 'in_bin'", "arm_state = 'home'"],
+      "reset": {"gripper_state": "open", "carton_state": "on_belt", "arm_state": "home"}
+    },
+    {
+      "id": "verify_sort",
+      "target": {"type": "camera", "name": "handoff_cam"},
+      "marker_site": "verify_zone_marker",
+      "pose": {"position": [0.535, -0.09, 0.046], "orientation_xyzw": [0, 0, 0, 1]},
+      "affordance": "inspect",
+      "action": {"mode": "direct", "command": "verify_sort", "schema": {"type": "object", "properties": {}, "required": [], "additionalProperties": false}},
+      "preconditions": ["carton_state == 'in_bin'"],
+      "success_conditions": ["carton inside sort_bin interior", "handoff RGB-D capture valid", "task_state == 'verified'"],
+      "depends_on": ["place_box"],
+      "effects": ["task_state = 'verified'"],
+      "reset": {"task_state": "pending"}
+    }
+  ]
+}

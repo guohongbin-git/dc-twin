@@ -1,0 +1,118 @@
+{
+  "schema": "esr.loop_state/0.1",
+  "loop_id": "loop-t2m-pilot-001",
+  "beat": "ablate",
+  "status": "done",
+  "at": "2026-10-15T03:19:10+00:00",
+  "passed": true,
+  "cases": [
+    {
+      "case_id": "REG-T2M-1",
+      "passed": true,
+      "results": [
+        {
+          "assert": {
+            "metric": "max_pen_start_m",
+            "op": ">=",
+            "value": -0.0001
+          },
+          "ok": true,
+          "detail": "max_pen_start_m=-4.016428734874555e-07 ge -0.0001"
+        },
+        {
+          "assert": {
+            "metric": "max_pen_seq_m",
+            "op": ">=",
+            "value": -0.001
+          },
+          "ok": true,
+          "detail": "max_pen_seq_m=-0.0006633385604184401 ge -0.001"
+        },
+        {
+          "assert": {
+            "metric": "seq_steps",
+            "op": ">=",
+            "value": 10000
+          },
+          "ok": true,
+          "detail": "seq_steps=21138 ge 10000"
+        },
+        {
+          "assert": {
+            "metric": "carry_arrival_err_m",
+            "op": "<=",
+            "value": 0.03
+          },
+          "ok": true,
+          "detail": "carry_arrival_err_m=0.01250487531573019 le 0.03"
+        }
+      ]
+    },
+    {
+      "case_id": "REG-T2M-2",
+      "passed": true,
+      "results": [
+        {
+          "assert": {
+            "metric": "handoff_pair_ok",
+            "op": "eq",
+            "value": true
+          },
+          "ok": true,
+          "detail": "handoff_pair_ok=True eq True"
+        },
+        {
+          "assert": {
+            "metric": "weld_release_drop_m",
+            "op": ">=",
+            "value": 0.02
+          },
+          "ok": true,
+          "detail": "weld_release_drop_m=0.12852910045966884 ge 0.02"
+        },
+        {
+          "assert": {
+            "metric": "carton_in_bin",
+            "op": "eq",
+            "value": true
+          },
+          "ok": true,
+          "detail": "carton_in_bin=True eq True"
+        }
+      ]
+    },
+    {
+      "case_id": "REG-T2M-3",
+      "passed": true,
+      "results": [
+        {
+          "assert": {
+            "metric": "audit8_all_pass",
+            "op": "eq",
+            "value": true
+          },
+          "ok": true,
+          "detail": "audit8_all_pass=True eq True"
+        },
+        {
+          "assert": {
+            "metric": "determinism_ok",
+            "op": "eq",
+            "value": true
+          },
+          "ok": true,
+          "detail": "determinism_ok=True eq True"
+        },
+        {
+          "assert": {
+            "metric": "task_success",
+            "op": "eq",
+            "value": true
+          },
+          "ok": true,
+          "detail": "task_success=True eq True"
+        }
+      ]
+    }
+  ]
+}

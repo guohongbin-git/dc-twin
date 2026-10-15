@@ -1,0 +1,12 @@
+{
+  "schema": "esr.loop_state/0.1",
+  "loop_id": "loop-t2m-pilot-001",
+  "beat": "run",
+  "status": "done",
+  "at": "2026-10-15T03:19:10+00:00",
+  "mode": "reuse_existing",
+  "incident_dir": "/Users/guohongbin/1-Projects/dc-twin/tests/fixtures/esr/pilot_t2m",
+  "runs": [
+    "run_t2m.json"
+  ]
+}

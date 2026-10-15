@@ -1,0 +1,13 @@
+{
+  "schema": "esr.loop_state/0.1",
+  "loop_id": "loop-t2m-pilot-001",
+  "beat": "evolve",
+  "status": "done",
+  "at": "2026-10-15T03:19:10+00:00",
+  "proposal_id": "PROP-INC-T2M-PILOT-001",
+  "gate_approved": true,
+  "rejections": [],
+  "registered": [
+    "node_source:T2M_HANDOFF_CELL@idempotent"
+  ]
+}

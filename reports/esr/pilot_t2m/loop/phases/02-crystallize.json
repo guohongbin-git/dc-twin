@@ -1,0 +1,175 @@
+{
+  "schema": "esr.loop_state/0.1",
+  "loop_id": "loop-t2m-pilot-001",
+  "beat": "crystallize",
+  "status": "done",
+  "at": "2026-10-15T03:19:10+00:00",
+  "record": {
+    "schema": "esr.incident_record/0.1",
+    "incident_id": "INC-T2M-PILOT-001",
+    "title": "text2mujoco 生成场景无证据契约 (账实不可对), 无法进 dc-twin 证据闭环",
+    "window": {
+      "t_start": 0.0,
+      "t_end": 12.0,
+      "clock_domain": "sim_t"
+    },
+    "runs": [
+      "run_t2m"
+    ],
+    "source": "text2mujoco→ESR 全链试点: text2mujoco skill 生成 conveyor-to-arm handoff cell (reports/esr/pilot_t2m/scene), 按 ESR 语义补齐准入材料并走五拍闭环",
+    "root_cause_hypothesis": {
+      "statement": "人工 (text/LLM) 生成的 MuJoCo 场景包只有工件没有证据契约: 交付物 (scene_spec/MJCF/environment/manifest) 自带 skill 八检查, 但证据只存在于一次性运行日志 —— 无机器可核的实测账 (最深穿透/序列步数/determinism), 无预注册回归用例, 无事件类型定义与节点注册, dc-twin 的证据体系 (node_source 注册表 + event_kind 事件对 + 回归工件回放) 无法对它记账, 即 账实不可对",
+      "mechanism": [
+        "text2mujoco 产物按 skill validation_checklist 自证 (static/model audit/physics/render 四层), 但证据不落为可回放工件, 换进程/换版本即失证",
+        "dc-twin 证据闭环要求: 新场景元素经场景进化门三件套准入 (证据契约草案 + 消融子集 + 回归用例缺一拒绝), 回归断言必须挂在实测证据工件上由 ⑤拍离线回放",
+        "交接类交互的证据原子性 = 事件对 (拾取/放置, C1 时间三元组 + 位形), 场景包若无事件类型注册则账面无法表达交接",
+        "场景元素要进调度/布局索引必须走 core register_node_source 节点源 (纯函数 fn(MatrixLayout)), 直改布局/硬编码均为反模式"
+      ],
+      "confidence": 0.85,
+      "evidence_refs": [
+        "reports/esr/pilot_t2m/scene/output/physics_smoke_report.json",
+        "reports/esr/pilot_t2m/scene/output/render_results.json"
+      ]
+    },
+    "fix_actions": [
+      {
+        "action_id": "FIX-1",
+        "target": "dc-twin 场景注册表 (T2M_HANDOFF_CELL 节点类型)",
+        "description": "把 text2mujoco 交接单元注册为 node_source: 纯函数 t2m_handoff_cell_nodes (fn(MatrixLayout) → T2M:CELL/T2M:BELT_END/T2M:SORT_BIN 三锚点), 契约修订随四件套经 ESR 场景进化门审查落册 (core register_node_source)",
+        "expected_effect": "场景进化门 approved + 落册可重放 (同进程重跑幂等放行 @idempotent), 交接单元进布局/调度索引"
+      },
+      {
+        "action_id": "FIX-2",
+        "target": "证据契约 (HANDOFF_PICK/HANDOFF_PLACE 事件对 + 回归证据工件)",
+        "description": "交接的证据 = 事件对: grip_close 焊联激活瞬间记 HANDOFF_PICK, place_box 释放沉降后记 HANDOFF_PLACE (C1 时间三元组 + 箱位形); physics_smoke 实测值 (最深穿透/序列步数/determinism/释放坠落) 固化为证据工件 tests/fixtures/esr/pilot_t2m/runs/run_t2m.json 供 ⑤拍消融回放断言",
+        "expected_effect": "交接原子性可账面核验 (事件对成对且 pick.t ≤ place.t), 实测账可跨进程回放 (宁严勿漏: 缺工件/任一断言不过即败)"
+      }
+    ],
+    "regression_cases": [
+      {
+        "case_id": "REG-T2M-1",
+        "name": "带→臂携运与物理账 (消融子集: 辊床驱动时序)",
+        "seeds": [
+          7
+        ],
+        "scenario": "t2m.handoff.carry",
+        "asserts": [
+          {
+            "metric": "max_pen_start_m",
+            "op": ">=",
+            "value": -0.0001
+          },
+          {
+            "metric": "max_pen_seq_m",
+            "op": ">=",
+            "value": -0.001
+          },
+          {
+            "metric": "seq_steps",
+            "op": ">=",
+            "value": 10000
+          },
+          {
+            "metric": "carry_arrival_err_m",
+            "op": "<=",
+            "value": 0.03
+          }
+        ],
+        "covers_action": "FIX-2",
+        "evidence": "runs/run_t2m.json"
+      },
+      {
+        "case_id": "REG-T2M-2",
+        "name": "HANDOFF_PICK/PLACE 事件对 + 中空释放坠落",
+        "seeds": [
+          7
+        ],
+        "scenario": "t2m.handoff.events",
+        "asserts": [
+          {
+            "metric": "handoff_pair_ok",
+            "op": "eq",
+            "value": true
+          },
+          {
+            "metric": "weld_release_drop_m",
+            "op": ">=",
+            "value": 0.02
+          },
+          {
+            "metric": "carton_in_bin",
+            "op": "eq",
+            "value": true
+          }
+        ],
+        "covers_action": "FIX-2",
+        "evidence": "runs/run_t2m.json"
+      },
+      {
+        "case_id": "REG-T2M-3",
+        "name": "契约门准入与八项 audit 端到端",
+        "seeds": [
+          7
+        ],
+        "scenario": "t2m.handoff.e2e",
+        "asserts": [
+          {
+            "metric": "audit8_all_pass",
+            "op": "eq",
+            "value": true
+          },
+          {
+            "metric": "determinism_ok",
+            "op": "eq",
+            "value": true
+          },
+          {
+            "metric": "task_success",
+            "op": "eq",
+            "value": true
+          }
+        ],
+        "covers_action": "FIX-1",
+        "evidence": "runs/run_t2m.json"
+      }
+    ],
+    "evidence_contract_revision": {
+      "revision_kind": "new",
+      "summary": "T2M_HANDOFF_CELL 节点类型证据契约 (草案): (a) 新节点源 t2m_handoff_cell_nodes 经场景进化门入册 core 布局注册表 (T2M:CELL/T2M:BELT_END/T2M:SORT_BIN); (b) 交接证据 = HANDOFF_PICK/HANDOFF_PLACE 事件对 (C1 时间三元组 + carton 位形, PICK 随 grasp weld 激活, PLACE 随释放沉降); (c) 保证: 每次成功交接事件对成对且 pick.t ≤ place.t, 物理账由回归工件背书 (序列最深穿透 ≥ -1e-3 m, 起始 ≥ -1e-4 m, determinism 一致, 中空释放坠落 ≥ 20 mm)",
+      "proposed_changes": [
+        {
+          "path": "node_registry.t2m_handoff_cell",
+          "change": "注册 T2M_HANDOFF_CELL 节点类型: t2m_handoff_cell_nodes 节点源 (交接单元锚点: CELL/BELT_END/SORT_BIN)",
+          "reason": "text2mujoco 生成场景进 dc-twin 布局/调度索引的唯一合法通道; 消融子集 = REG-T2M-1/3",
+          "register": {
+            "as": "node_source",
+            "fn": "reports.esr.pilot_t2m.node_source:t2m_handoff_cell_nodes",
+            "name": "T2M_HANDOFF_CELL"
+          }
+        },
+        {
+          "path": "evidence_contract.handoff_pick",
+          "change": "注册交接拾取事件类型 HANDOFF_PICK (grasp weld 激活位形捕获, 带 start)",
+          "reason": "交接原子性的起点证据",
+          "register": {
+            "as": "event_kind",
+            "kind": "HANDOFF_PICK",
+            "description": "text2mujoco 交接拾取 (夹爪闭合 + grasp weld 激活, 捕获 carton 位形, 带 start)"
+          }
+        },
+        {
+          "path": "evidence_contract.handoff_place",
+          "change": "注册交接放置事件类型 HANDOFF_PLACE (释放沉降落账, 带 end)",
+          "reason": "交接原子性的终点证据; pick.t ≤ place.t + 箱入位构成成对保证",
+          "register": {
+            "as": "event_kind",
+            "kind": "HANDOFF_PLACE",
+            "description": "text2mujoco 交接放置 (weld 释放 + 箱体沉降入位, 捕获 carton 位形, 带 end)"
+          }
+        }
+      ],
+      "status": "draft"
+    }
+  },
+  "crystallized_by": "deterministic"
+}

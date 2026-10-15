@@ -1,0 +1,150 @@
+{
+  "schema": "t2m.physics_smoke/0.1",
+  "scene": "t2m_handoff_cell",
+  "generated_at": "2026-10-15T03:17:08+00:00",
+  "mujoco_version": "3.14.0",
+  "python": "3.13.9",
+  "gl_backend": "disable",
+  "static": {
+    "skill_validator": {
+      "status": "PASS",
+      "output": "PASS"
+    },
+    "xml_parse": "PASS",
+    "mjcf_compile": "PASS",
+    "manifest_spec_parity": "PASS",
+    "unique_names": {
+      "status": "PASS",
+      "duplicates": []
+    },
+    "dimension_conversion": "PASS",
+    "zero_mask_geoms": {
+      "status": "PASS",
+      "geoms": []
+    },
+    "jointed_without_collision": {
+      "status": "PASS",
+      "bodies": []
+    },
+    "declared_mass_xml": {
+      "status": "PASS",
+      "missing": []
+    },
+    "marker_site_resolution": {
+      "status": "PASS",
+      "bad": []
+    }
+  },
+  "audit": {
+    "undeclared_self_overlap": {
+      "violations": [],
+      "status": "PASS",
+      "min_dist_m": -0.06199997535010427
+    },
+    "collision_geometry": {
+      "status": "PASS",
+      "uncovered_geoms": []
+    },
+    "servo_hold": {
+      "status": "PASS",
+      "max_drift_m": 2.4123813685803517e-18,
+      "max_drift_deg": 0.0
+    },
+    "link_continuity": {
+      "status": "PASS",
+      "max_gap_m": 0.0030000000000000027,
+      "max_gap_m_over_replay": 0.0030000000000000027,
+      "per_body_m": {
+        "roller_1": 0.0,
+        "roller_2": 0.0,
+        "roller_3": 0.0,
+        "roller_4": 0.0,
+        "roller_5": 0.0,
+        "roller_6": 0.0,
+        "yaw_body": 0.0,
+        "carriage": 0.0,
+        "reach_body": 0.0,
+        "finger_l": 0.003,
+        "finger_r": 0.003
+      }
+    },
+    "marker_grounding": {
+      "status": "PASS",
+      "bad_sites": []
+    }
+  },
+  "physics": {
+    "start_pose": {
+      "qpos0_min_dist": 0.0,
+      "post_reset_min_dist": -4.016428734874555e-07,
+      "status": "PASS"
+    },
+    "step_belt_feed": "PASS",
+    "step_approach_pick": "PASS",
+    "step_grip_close": "PASS",
+    "step_place_box": "PASS",
+    "step_verify_sort": "PASS",
+    "sequence_contact": {
+      "steps": 21138,
+      "deepest_dist_m": -0.0006633385604184401,
+      "deepest_pair": [
+        "carton_geom",
+        "bin_bottom"
+      ],
+      "deepest_t": 9.30499999999988,
+      "status": "PASS"
+    },
+    "deterministic_reset": {
+      "reset_identical": true,
+      "replay_identical": true,
+      "status": "PASS"
+    },
+    "task_success": true,
+    "weld_release_drop": {
+      "drop_m": 0.12852910045966884,
+      "status": "PASS"
+    },
+    "artifact_persistence": {
+      "mjb_saved": true,
+      "mjb_reopened": true,
+      "xml_reloaded": true,
+      "status": "PASS"
+    }
+  },
+  "events": [
+    {
+      "kind": "HANDOFF_PICK",
+      "t": 6.919999999998884,
+      "carton_xpos": [
+        -0.22270427965491246,
+        -0.00414732262439494,
+        0.24999963512553736
+      ],
+      "weld_active": true
+    },
+    {
+      "kind": "HANDOFF_PLACE",
+      "t": 10.569000000001425,
+      "carton_xpos": [
+        0.46254595964286505,
+        0.004155089050190796,
+        0.08999972674308049
+      ],
+      "weld_active": false
+    }
+  ],
+  "metrics": {
+    "max_pen_start_m": -4.016428734874555e-07,
+    "weld_release_drop_m": 0.12852910045966884,
+    "carton_in_bin": true,
+    "seq_steps": 21138,
+    "max_pen_seq_m": -0.0006633385604184401,
+    "determinism_ok": true,
+    "belt_feed_carton_x_m": -0.22250487531573018,
+    "carry_arrival_err_m": 0.01250487531573019,
+    "handoff_pair_ok": true,
+    "audit8_all_pass": true
+  },
+  "audit8_all_pass": true,
+  "status": "PASS"
+}

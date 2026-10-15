@@ -1,0 +1,37 @@
+{
+  "schema": "t2m.render_smoke/0.1",
+  "scene": "t2m_handoff_cell",
+  "generated_at": "2026-10-15T03:19:09+00:00",
+  "mujoco_version": "3.14.0",
+  "gl_backend": "glfw",
+  "before": {
+    "rgb_shape": [
+      480,
+      640,
+      3
+    ],
+    "rgb_nonblank": true,
+    "rgb_mean": 126.66407877604166
+  },
+  "after": {
+    "rgb_shape": [
+      480,
+      640,
+      3
+    ],
+    "rgb_nonblank": true,
+    "rgb_mean": 126.899638671875,
+    "depth_shape": [
+      480,
+      640
+    ],
+    "depth_finite": true,
+    "depth_range_m": [
+      0.9610680341720581,
+      80.91325378417969
+    ]
+  },
+  "pixel_change_sum": 1183966,
+  "task_success": true,
+  "status": "PASS"
+}

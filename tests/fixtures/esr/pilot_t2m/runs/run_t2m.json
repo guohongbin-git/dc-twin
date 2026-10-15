@@ -1,0 +1,25 @@
+{
+  "run_id": "T2M-PILOT-FIX",
+  "scene": "t2m_handoff_cell",
+  "cycles": 1,
+  "max_pen_start_m": -4.016428734874555e-07,
+  "max_pen_seq_m": -0.0006633385604184401,
+  "seq_steps": 21138,
+  "carry_arrival_err_m": 0.01250487531573019,
+  "weld_release_drop_m": 0.12852910045966884,
+  "carton_in_bin": true,
+  "handoff_pair_ok": true,
+  "audit8_all_pass": true,
+  "determinism_ok": true,
+  "task_success": true,
+  "events": [
+    [
+      "HANDOFF_PICK",
+      6.92
+    ],
+    [
+      "HANDOFF_PLACE",
+      10.569
+    ]
+  ]
+}
